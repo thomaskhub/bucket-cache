@@ -10,6 +10,17 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      rustfs:
+        image: rustfs/rustfs:latest
+        ports: ["9000:9000"]
+        env:
+          RUSTFS_ACCESS_KEY: ci-access-key
+          RUSTFS_SECRET_KEY: ci-secret-key-123
+    env:
+      RUSTFS_ENDPOINT: http://127.0.0.1:9000
+      RUSTFS_ACCESS_KEY: ci-access-key
+      RUSTFS_SECRET_KEY: ci-secret-key-123
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -23,7 +34,7 @@ jobs:
       - name: License check (NFR-LIC)
         run: |
           go install github.com/google/go-licenses/v2@latest
-          go-licenses check ./... --ignore github.com/thomaskhub/yocto-cache-proxy --allowed_licenses=MIT,BSD-2-Clause,BSD-3-Clause,ISC,Apache-2.0,0BSD,Unlicense
+          go-licenses check ./... --ignore github.com/thomaskhub/bucket-cache --allowed_licenses=MIT,BSD-2-Clause,BSD-3-Clause,ISC,Apache-2.0,0BSD,Unlicense
 
   image:
     runs-on: ubuntu-latest

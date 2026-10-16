@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thomaskhub/yocto-cache-proxy/internal/config"
-	"github.com/thomaskhub/yocto-cache-proxy/internal/metrics"
+	"github.com/thomaskhub/bucket-cache/internal/config"
+	"github.com/thomaskhub/bucket-cache/internal/metrics"
 )
 
 func testConfig(t *testing.T, extra string) *config.Config {

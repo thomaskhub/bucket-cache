@@ -15,10 +15,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/thomaskhub/yocto-cache-proxy/internal/config"
-	"github.com/thomaskhub/yocto-cache-proxy/internal/metrics"
-	"github.com/thomaskhub/yocto-cache-proxy/internal/server"
-	"github.com/thomaskhub/yocto-cache-proxy/internal/version"
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/thomaskhub/bucket-cache/internal/api"
+	"github.com/thomaskhub/bucket-cache/internal/auth"
+	"github.com/thomaskhub/bucket-cache/internal/config"
+	"github.com/thomaskhub/bucket-cache/internal/metrics"
+	"github.com/thomaskhub/bucket-cache/internal/s3proxy"
+	"github.com/thomaskhub/bucket-cache/internal/server"
+	"github.com/thomaskhub/bucket-cache/internal/store"
+	"github.com/thomaskhub/bucket-cache/internal/version"
 )
 
 const usage = `Usage: yproxy <command> [flags]
@@ -106,11 +112,63 @@ func serve(cfgPath string, stderr io.Writer) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	if err := server.New(cfg, log, metrics.NewRegistry()).Run(ctx); err != nil {
-		log.Error("server stopped", "error", err.Error())
+
+	st, err := store.Open(ctx, cfg.Storage.DBPath)
+	if err != nil {
+		log.Error("opening database failed", "path", cfg.Storage.DBPath, "error", err.Error())
+		return 1
+	}
+	defer st.Close()
+
+	reg := metrics.NewRegistry()
+	authn := auth.New(st, log, cfg.Auth.BootstrapAdminKey.Value(), cfg.Auth.ValidationCacheTTL.D())
+	maintCtx, stopMaint := context.WithCancel(context.Background())
+	maintDone := make(chan struct{})
+	go func() { authn.RunMaintenance(maintCtx, 10*time.Second); close(maintDone) }()
+	go reportActiveTokens(ctx, st, reg, log)
+
+	backends := map[string]s3proxy.Backend{}
+	for _, b := range cfg.Buckets {
+		backends[b.Alias] = s3proxy.NewS3Backend(b)
+	}
+	objects := s3proxy.NewHandler(backends, authn, log, reg, cfg.Log.Access)
+
+	srv := server.New(cfg, log, reg, server.WithRoute(objects), server.WithPing(st.Ping))
+	api.New(cfg, st, authn, backends, log).Register(srv.Admin)
+
+	runErr := srv.Run(ctx)
+	stopMaint()
+	<-maintDone // flush token usage before the database closes
+	if runErr != nil {
+		log.Error("server stopped", "error", runErr.Error())
 		return 1
 	}
 	return 0
+}
+
+// reportActiveTokens updates the active-token gauge every 30 seconds.
+func reportActiveTokens(ctx context.Context, st *store.Store, reg prometheus.Registerer, log *slog.Logger) {
+	g := prometheus.NewGaugeVec(prometheus.GaugeOpts{Namespace: metrics.Namespace, Name: "tokens_active",
+		Help: "Tokens that are neither expired nor revoked, by kind."}, []string{"kind"})
+	reg.MustRegister(g)
+	t := time.NewTicker(30 * time.Second)
+	defer t.Stop()
+	for {
+		counts, err := st.CountActiveTokens(ctx, time.Now())
+		if err == nil {
+			g.Reset()
+			for k, n := range counts {
+				g.WithLabelValues(k).Set(float64(n))
+			}
+		} else if ctx.Err() == nil {
+			log.Warn("counting active tokens failed", "error", err.Error())
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }
 
 // healthcheck lets the container image check itself without curl or a shell.

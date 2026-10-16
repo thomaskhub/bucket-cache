@@ -1,5 +1,5 @@
-yocto-cache-proxy
-Copyright 2026 The yocto-cache-proxy authors
+bucket-cache
+Copyright 2026 The bucket-cache authors
 
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 Third-party Go modules and their licenses are listed in THIRD_PARTY_LICENSES.csv.

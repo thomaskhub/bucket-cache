@@ -19,7 +19,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/thomaskhub/yocto-cache-proxy/internal/config"
+	"github.com/thomaskhub/bucket-cache/internal/config"
 )
 
 // Server owns both listeners. The data listener serves object and git
@@ -32,25 +32,57 @@ type Server struct {
 	data *http.Server
 	adm  *http.Server
 
-	// Data is the handler for object and git traffic. Later milestones
-	// mount the S3 and git handlers here.
+	// Data serves health checks on the data listener. Object and git
+	// traffic goes to the Routes, which are matched first.
 	Data *http.ServeMux
 	// Admin is the handler for the UI and management API.
 	Admin *http.ServeMux
+
+	routes []Route
+	ping   func(context.Context) error
 }
 
+// Route is a data-plane handler that claims its own paths. Routes bypass
+// http.ServeMux, which would redirect the "//" paths BitBake produces.
+type Route interface {
+	http.Handler
+	Match(path string) bool
+}
+
+// Option configures a Server.
+type Option func(*Server)
+
+// WithRoute adds a data-plane route.
+func WithRoute(r Route) Option { return func(s *Server) { s.routes = append(s.routes, r) } }
+
+// WithPing adds a database check to /readyz.
+func WithPing(f func(context.Context) error) Option { return func(s *Server) { s.ping = f } }
+
 // New builds a server from a loaded config.
-func New(cfg *config.Config, log *slog.Logger, reg *prometheus.Registry) *Server {
+func New(cfg *config.Config, log *slog.Logger, reg *prometheus.Registry, opts ...Option) *Server {
 	s := &Server{cfg: cfg, log: log, reg: reg, Data: http.NewServeMux(), Admin: http.NewServeMux()}
+	for _, o := range opts {
+		o(s)
+	}
 
 	s.Data.HandleFunc("GET /healthz", s.healthz)
 	s.Admin.HandleFunc("GET /healthz", s.healthz)
 	s.Admin.HandleFunc("GET /readyz", s.readyz)
 	s.Admin.Handle("GET /metrics", s.metricsAuth(promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg})))
 
-	s.data = s.httpServer(cfg.Server.DataListen, s.Data)
+	s.data = s.httpServer(cfg.Server.DataListen, http.HandlerFunc(s.serveData))
 	s.adm = s.httpServer(cfg.Server.AdminListen, s.Admin)
 	return s
+}
+
+func (s *Server) serveData(w http.ResponseWriter, r *http.Request) {
+	for _, rt := range s.routes {
+		if rt.Match(r.URL.Path) {
+			rt.ServeHTTP(w, r)
+			return
+		}
+	}
+	s.Data.ServeHTTP(w, r)
 }
 
 func (s *Server) httpServer(addr string, h http.Handler) *http.Server {
@@ -135,8 +167,16 @@ type check struct {
 }
 
 // readyz reports whether the directories the proxy writes to are usable.
-func (s *Server) readyz(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	checks := []check{writable("data_dir", filepath.Dir(s.cfg.Storage.DBPath))}
+	if s.ping != nil {
+		c := check{Name: "database", OK: true}
+		if err := s.ping(r.Context()); err != nil {
+			c = check{Name: "database", Error: "unavailable"}
+			s.log.Warn("readiness: database check failed", "error", err.Error())
+		}
+		checks = append(checks, c)
+	}
 	if s.cfg.CacheEnabled() {
 		checks = append(checks, writable("cache_root", s.cfg.Storage.CacheRoot))
 	}

@@ -1,4 +1,4 @@
-# yocto-cache-proxy
+# bucket-cache
 
 A caching proxy for Yocto/BitBake builds. It serves sstate and download-cache
 objects from S3-compatible buckets (AWS S3, Cloudflare R2, RustFS, MinIO) over
@@ -21,7 +21,27 @@ Stage M0 (skeleton) is done:
   `/cache` and `/git`, built-in `healthcheck` command.
 - CI: vet, race tests, lint, license check and a multi-arch image build.
 
-Object access, tokens, caching, the UI and the git mirror follow in stages M1–M6.
+Stage M1 (S3 pass-through and tokens) is done:
+
+- `GET`/`HEAD` at `/t/{token}/{bucket}/{key}` (or `/{bucket}/{key}` with a
+  Bearer or Basic token), with Range and conditional requests, streaming, and
+  `404` for missing objects so BitBake falls back quickly.
+- Tokens and API keys (`admin`, `token-issuer` with a scope/TTL ceiling)
+  stored as hashes in SQLite; `DELETE /api/v1/tokens/self` for builds.
+- Only unknown tokens are rate-limited; expired or revoked tokens get `401`
+  and show up in `yproxy_auth_dead_token_requests_total`.
+
+Caching, the UI and the git mirror follow in stages M2–M6.
+
+## Creating a token for a build
+
+```sh
+TOKEN=$(curl -fsS -X POST http://cache.lan:8081/api/v1/tokens \
+  -H "Authorization: Bearer $PROXY_ISSUER_KEY" \
+  -d '{"buckets":["sstate"],"ttl":"6h","description":"pipeline 4711"}' | jq -r .token)
+curl -I "http://cache.lan:8080/t/$TOKEN/sstate/some/key"   # 200 or 404, never 401
+curl -X DELETE -H "Authorization: Bearer $TOKEN" http://cache.lan:8081/api/v1/tokens/self
+```
 
 ## Commands
 

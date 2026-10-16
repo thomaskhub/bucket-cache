@@ -6,7 +6,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
-	"github.com/thomaskhub/yocto-cache-proxy/internal/version"
+	"github.com/thomaskhub/bucket-cache/internal/version"
 )
 
 const Namespace = "yproxy"

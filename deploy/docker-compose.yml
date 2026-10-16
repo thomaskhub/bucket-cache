@@ -2,7 +2,7 @@
 #   openssl rand -hex 32 > secrets/admin_api_key
 services:
   yproxy:
-    image: ghcr.io/thomaskhub/yocto-cache-proxy:latest
+    image: ghcr.io/thomaskhub/bucket-cache:latest
     build: ..
     read_only: true
     ports: ["8080:8080", "127.0.0.1:8081:8081"]

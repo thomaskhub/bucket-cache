@@ -7,7 +7,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
-      -ldflags "-s -w -X github.com/thomaskhub/yocto-cache-proxy/internal/version.Version=$VERSION -X github.com/thomaskhub/yocto-cache-proxy/internal/version.Commit=$COMMIT" \
+      -ldflags "-s -w -X github.com/thomaskhub/bucket-cache/internal/version.Version=$VERSION -X github.com/thomaskhub/bucket-cache/internal/version.Commit=$COMMIT" \
       -o /out/yproxy ./cmd/yproxy
 
 # git is needed at runtime for the git mirror (it runs as a separate process,
