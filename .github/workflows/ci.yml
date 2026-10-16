@@ -35,6 +35,14 @@ jobs:
         run: |
           go install github.com/google/go-licenses/v2@latest
           go-licenses check ./... --ignore github.com/thomaskhub/bucket-cache --allowed_licenses=MIT,BSD-2-Clause,BSD-3-Clause,ISC,Apache-2.0,0BSD,Unlicense
+      - name: SBOM for the Go binary (SEC-23)
+        run: |
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
+          cyclonedx-gomod app -json -licenses -main cmd/yproxy -output yproxy.cdx.json .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom-go
+          path: yproxy.cdx.json
 
   image:
     runs-on: ubuntu-latest
@@ -52,3 +60,25 @@ jobs:
           build-args: |
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # buildx can't load a multi-arch image into the local daemon, so the
+      # image SBOM is taken from the amd64 build (same packages on arm64).
+      - name: Load amd64 image for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: yproxy:ci
+          cache-from: type=gha
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+      - name: SBOM for the image (SEC-23)
+        uses: anchore/sbom-action@v0
+        with:
+          image: yproxy:ci
+          format: spdx-json
+          output-file: yproxy-image.spdx.json
+          artifact-name: sbom-image.spdx.json

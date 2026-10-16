@@ -19,7 +19,7 @@ Stage M0 (skeleton) is done:
   `/readyz` and Prometheus `/metrics` (optionally behind a bearer token).
 - Docker image: non-root, read-only root filesystem, volumes `/data`,
   `/cache` and `/git`, built-in `healthcheck` command.
-- CI: vet, race tests, lint, license check and a multi-arch image build.
+- CI: vet, race tests, lint, license check, a multi-arch image build and SBOMs.
 
 Stage M1 (S3 pass-through and tokens) is done:
 
@@ -74,3 +74,21 @@ Apache-2.0; CI enforces this with `go-licenses` (see
 `THIRD_PARTY_LICENSES.csv`). The image also contains the `git` program
 (GPL-2.0), which runs as a separate process and is not linked into the proxy;
 its license is in `/usr/share/doc/git` inside the image.
+
+## SBOM
+
+Every CI run publishes two SBOMs as workflow artifacts:
+
+- `sbom-go`: a CycloneDX file (`yproxy.cdx.json`) listing every Go module
+  compiled into `yproxy`, with versions, hashes and detected licenses.
+- `sbom-image.spdx.json`: an SPDX file for the whole container image,
+  including the Debian packages such as `git`.
+
+To make the Go SBOM locally:
+
+```sh
+go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
+cyclonedx-gomod app -json -licenses -main cmd/yproxy -output yproxy.cdx.json .
+```
+
+Release images (M6) will carry the SBOM as a signed attestation in the registry.
