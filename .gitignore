@@ -1,0 +1,4 @@
+/yproxy
+/dist/
+deploy/secrets/
+*.db

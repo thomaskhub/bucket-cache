@@ -1,0 +1,4 @@
+.git
+deploy/secrets
+*.md
+!THIRD_PARTY_LICENSES*

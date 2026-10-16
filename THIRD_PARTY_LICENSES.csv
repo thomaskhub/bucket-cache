@@ -1,0 +1,12 @@
+package,license_url,license
+github.com/beorn7/perks/quantile,https://github.com/beorn7/perks/blob/v1.0.1/LICENSE,MIT
+github.com/cespare/xxhash/v2,https://github.com/cespare/xxhash/blob/v2.3.0/LICENSE.txt,MIT
+github.com/munnerz/goautoneg,https://github.com/munnerz/goautoneg/blob/a7dc8b61c822/LICENSE,BSD-3-Clause
+github.com/prometheus/client_golang/internal/github.com/golang/gddo/httputil,https://github.com/prometheus/client_golang/blob/v1.25.0/internal/github.com/golang/gddo/LICENSE,BSD-3-Clause
+github.com/prometheus/client_golang/prometheus,https://github.com/prometheus/client_golang/blob/v1.25.0/LICENSE,Apache-2.0
+github.com/prometheus/client_model/go,https://github.com/prometheus/client_model/blob/v0.6.3/LICENSE,Apache-2.0
+github.com/prometheus/common,https://github.com/prometheus/common/blob/v0.72.0/LICENSE,Apache-2.0
+github.com/prometheus/procfs,https://github.com/prometheus/procfs/blob/v0.22.0/LICENSE,Apache-2.0
+go.yaml.in/yaml/v3,Unknown,MIT
+golang.org/x/sys/unix,https://cs.opensource.google/go/x/sys/+/v0.48.0:LICENSE,BSD-3-Clause
+google.golang.org/protobuf,Unknown,BSD-3-Clause

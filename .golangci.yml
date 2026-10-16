@@ -1,0 +1,6 @@
+version: "2"
+linters:
+  enable: [gosec, errorlint, bodyclose, misspell]
+  settings:
+    gosec:
+      excludes: [G304] # reading config and secret files from configured paths is intended

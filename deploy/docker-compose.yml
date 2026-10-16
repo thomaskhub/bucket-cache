@@ -1,0 +1,30 @@
+# Example deployment. Create one file per secret under ./secrets first, e.g.
+#   openssl rand -hex 32 > secrets/admin_api_key
+services:
+  yproxy:
+    image: ghcr.io/thomaskhub/yocto-cache-proxy:latest
+    build: ..
+    read_only: true
+    ports: ["8080:8080", "127.0.0.1:8081:8081"]
+    volumes:
+      - ./config.example.yaml:/etc/proxy/config.yaml:ro
+      - yproxy-data:/data
+      - yproxy-cache:/cache
+      - yproxy-git:/git
+    tmpfs: ["/tmp"]
+    secrets: [admin_api_key, initial_admin_user, initial_admin_password, db_encryption_key,
+              rustfs_access_key, rustfs_secret_key, r2_access_key, r2_secret_key,
+              github_token, metrics_token]
+    restart: unless-stopped
+secrets:
+  admin_api_key:          { file: ./secrets/admin_api_key }
+  initial_admin_user:     { file: ./secrets/initial_admin_user }
+  initial_admin_password: { file: ./secrets/initial_admin_password }
+  db_encryption_key:      { file: ./secrets/db_encryption_key }
+  rustfs_access_key:      { file: ./secrets/rustfs_access_key }
+  rustfs_secret_key:      { file: ./secrets/rustfs_secret_key }
+  r2_access_key:          { file: ./secrets/r2_access_key }
+  r2_secret_key:          { file: ./secrets/r2_secret_key }
+  github_token:           { file: ./secrets/github_token }
+  metrics_token:          { file: ./secrets/metrics_token }
+volumes: { yproxy-data: {}, yproxy-cache: {}, yproxy-git: {} }

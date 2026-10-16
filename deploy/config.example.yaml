@@ -1,0 +1,63 @@
+# Example configuration. Secret values are never written here: each secret is
+# a {file: ...} reference to a Docker secret mounted under /run/secrets.
+
+server:
+  data_listen: ":8080"          # object access and git (build network)
+  admin_listen: ":8081"         # UI, /api/v1, /metrics (keep internal)
+  public_base_url: "http://cache.example.lan:8080"
+  tls: { cert_file: "", key_file: "" }   # empty = plain HTTP, or TLS from a reverse proxy
+
+auth:
+  bootstrap_admin_key:    { file: /run/secrets/admin_api_key }
+  initial_admin_user:     { file: /run/secrets/initial_admin_user }      # used only when no users exist
+  initial_admin_password: { file: /run/secrets/initial_admin_password }
+  db_encryption_key:      { file: /run/secrets/db_encryption_key }       # encrypts TOTP secrets
+  token_default_ttl: 12h
+  token_max_ttl: 72h
+
+storage:
+  db_path: /data/proxy.db
+  cache_root: /cache
+
+buckets:
+  - alias: sstate
+    provider: rustfs
+    endpoint: http://rustfs.lan:9000
+    bucket: yocto-sstate
+    credentials:
+      access_key_id:     { file: /run/secrets/rustfs_access_key }
+      secret_access_key: { file: /run/secrets/rustfs_secret_key }
+    mode: passthrough            # backend is on the LAN; no local copy
+
+  - alias: sstate-cloud
+    provider: r2
+    endpoint: https://ACCOUNT_ID.r2.cloudflarestorage.com
+    bucket: yocto-sstate
+    credentials:
+      access_key_id:     { file: /run/secrets/r2_access_key }
+      secret_access_key: { file: /run/secrets/r2_secret_key }
+    mode: cache
+    cache:
+      max_size: 200GiB
+      freshness: immutable
+      negative_ttl: 30s
+      serve_stale: true
+
+git:
+  storage: /git
+  max_size: 300GiB
+  evict_after: 90d
+  remotes:
+    - name: github
+      url: https://github.com
+      credentials:
+        token: { file: /run/secrets/github_token }
+      allow: ["acme/*"]
+      refresh_interval: 10m
+      ls_remote_cache: 3s
+
+metrics:
+  bearer_token: { file: /run/secrets/metrics_token }
+
+log:
+  level: info
