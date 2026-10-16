@@ -49,7 +49,7 @@ reverse proxy when traffic crosses untrusted networks.
 
 ## Licenses
 
-The proxy is MIT licensed. Every Go dependency must be MIT, BSD, ISC or
+The proxy is licensed under the Apache License 2.0 (see `LICENSE` and `NOTICE`). Every Go dependency must be MIT, BSD, ISC or
 Apache-2.0; CI enforces this with `go-licenses` (see
 `THIRD_PARTY_LICENSES.csv`). The image also contains the `git` program
 (GPL-2.0), which runs as a separate process and is not linked into the proxy;

@@ -1,0 +1,7 @@
+yocto-cache-proxy
+Copyright 2026 The yocto-cache-proxy authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+Third-party Go modules and their licenses are listed in THIRD_PARTY_LICENSES.csv.
+The container image also contains the git program (GPL-2.0), which runs as a
+separate process; its license is in /usr/share/doc/git inside the image.

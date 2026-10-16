@@ -21,7 +21,7 @@ RUN apt-get update \
  && chown 10001:10001 /data /cache /git
 COPY --from=build /out/yproxy /usr/local/bin/yproxy
 COPY THIRD_PARTY_LICENSES* /usr/share/doc/yproxy/
-COPY LICENSE /usr/share/doc/yproxy/LICENSE
+COPY LICENSE NOTICE /usr/share/doc/yproxy/
 USER 10001:10001
 ENV PROXY_CONFIG=/etc/proxy/config.yaml HOME=/git/.home
 VOLUME ["/data", "/cache", "/git"]
