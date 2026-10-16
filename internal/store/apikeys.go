@@ -35,6 +35,7 @@ func (s *Store) CreateAPIKey(ctx context.Context, k *APIKey) error {
 	return err
 }
 
+//nolint:gosec // G101 false positive: a column list, not a credential
 const apiKeyCols = `id, hash, name, role, ceiling, created_at, last_used_at, revoked_at`
 
 func scanAPIKey(row interface{ Scan(...any) error }) (*APIKey, error) {

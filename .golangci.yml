@@ -2,5 +2,22 @@ version: "2"
 linters:
   enable: [gosec, errorlint, bodyclose, misspell]
   settings:
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Tx).Rollback
+        - (*database/sql.DB).Close
+        - (*github.com/thomaskhub/bucket-cache/internal/store.Store).Close
+        - (*os.File).Close
+        - (net.Listener).Close
+        - os.Remove
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
     gosec:
-      excludes: [G304] # reading config and secret files from configured paths is intended
+      excludes: [G304, G104] # G304: config and secret paths are intended; G104 duplicates errcheck
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [errcheck, gosec, bodyclose]

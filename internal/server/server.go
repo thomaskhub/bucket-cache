@@ -130,7 +130,7 @@ func (s *Server) Run(ctx context.Context) error {
 	case <-ctx.Done():
 	case err := <-errc:
 		if !errors.Is(err, http.ErrServerClosed) {
-			s.shutdown()
+			_ = s.shutdown()
 			return err
 		}
 	}

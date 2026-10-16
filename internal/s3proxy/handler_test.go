@@ -243,9 +243,8 @@ func TestObjectAccess(t *testing.T) {
 		t.Fatalf("bad range = %d, want 416", resp.StatusCode)
 	}
 
-	etag := resp.Header.Get("ETag")
 	resp, _ = e.do("GET", "/t/"+tok+key, nil)
-	etag = resp.Header.Get("ETag")
+	etag := resp.Header.Get("ETag")
 	resp, _ = e.do("GET", "/t/"+tok+key, map[string]string{"If-None-Match": etag})
 	if resp.StatusCode != 304 {
 		t.Fatalf("If-None-Match = %d, want 304", resp.StatusCode)

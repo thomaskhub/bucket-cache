@@ -192,7 +192,7 @@ func healthcheck(cfgPath string, stderr io.Writer) int {
 		// The certificate is for the public name, not 127.0.0.1.
 		client.Transport = insecureLoopbackTransport()
 	}
-	resp, err := client.Get(scheme + "://127.0.0.1:" + port + "/healthz")
+	resp, err := client.Get(scheme + "://127.0.0.1:" + port + "/healthz") //nolint:gosec // G704: fixed loopback URL
 	if err != nil {
 		fmt.Fprintf(stderr, "healthcheck failed: %v\n", err)
 		return 1

@@ -63,6 +63,7 @@ func (s *Store) CreateToken(ctx context.Context, t *Token) error {
 	return err
 }
 
+//nolint:gosec // G101 false positive: a column list, not a credential
 const tokenCols = `id, hash, kind, description, labels, scope, created_by, created_at, expires_at, revoked_at, last_used_at, requests, bytes`
 
 func scanToken(row interface{ Scan(...any) error }) (*Token, error) {
