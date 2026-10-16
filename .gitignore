@@ -2,3 +2,4 @@
 /dist/
 deploy/secrets/
 *.db
+deploy/debug/secrets/

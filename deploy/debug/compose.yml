@@ -1,0 +1,35 @@
+# Debug stack started by scripts/debug.sh (Podman or Docker Compose): yproxy plus a local RustFS bucket.
+services:
+  rustfs:
+    image: ${RUSTFS_IMAGE:-docker.io/rustfs/rustfs:latest}
+    environment:
+      RUSTFS_ACCESS_KEY: debug-access-key
+      RUSTFS_SECRET_KEY: debug-secret-key
+    ports: ["127.0.0.1:${RUSTFS_PORT:-9000}:9000"]
+    volumes: [rustfs-data:/data]
+
+  yproxy:
+    build:
+      context: ../..
+      dockerfile: ${YPROXY_DOCKERFILE:-Dockerfile}
+      args: { VERSION: debug, COMMIT: local }
+    image: localhost/yproxy:debug
+    read_only: true
+    depends_on: [rustfs]
+    ports:
+      - "127.0.0.1:${DATA_PORT:-8080}:8080"
+      - "127.0.0.1:${ADMIN_PORT:-8081}:8081"
+    volumes:
+      - ./config.yaml:/etc/proxy/config.yaml:ro
+      - yproxy-data:/data
+      - yproxy-cache:/cache
+      - yproxy-git:/git
+    tmpfs: ["/tmp"]
+    secrets: [admin_api_key, rustfs_access_key, rustfs_secret_key]
+
+secrets:
+  admin_api_key:     { file: ./secrets/admin_api_key }
+  rustfs_access_key: { file: ./secrets/rustfs_access_key }
+  rustfs_secret_key: { file: ./secrets/rustfs_secret_key }
+
+volumes: { rustfs-data: {}, yproxy-data: {}, yproxy-cache: {}, yproxy-git: {} }

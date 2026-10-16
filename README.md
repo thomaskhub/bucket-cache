@@ -67,6 +67,24 @@ docker compose up -d
 The proxy serves plain HTTP by default. Use TLS (`server.tls`) or a TLS
 reverse proxy when traffic crosses untrusted networks.
 
+## Debug instance
+
+`scripts/debug.sh` starts a throwaway instance on localhost: the proxy with
+debug and access logging, a RustFS server with a `debug-sstate` bucket and a
+test object, and a 12-hour build token. It prints the token, curl examples and
+the `SSTATE_MIRRORS` line for `local.conf`.
+
+```sh
+scripts/debug.sh          # build and start (Podman, or Docker if Podman is missing)
+scripts/debug.sh token    # create another token
+scripts/debug.sh logs     # follow the proxy logs
+scripts/debug.sh down     # stop; add --wipe to delete all data
+```
+
+It needs `podman` with `podman-compose` (`apt install podman-compose` or
+`pip install podman-compose`), or Docker with Compose (`CONTAINER_ENGINE=docker`).
+Change the ports with `DATA_PORT`, `ADMIN_PORT` and `RUSTFS_PORT`.
+
 ## Licenses
 
 The proxy is licensed under the Apache License 2.0 (see `LICENSE` and `NOTICE`). Every Go dependency must be MIT, BSD, ISC or

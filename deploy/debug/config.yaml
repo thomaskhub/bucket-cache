@@ -1,0 +1,26 @@
+# Debug instance config, used by scripts/debug.sh. Not for production.
+server:
+  data_listen: ":8080"
+  admin_listen: ":8081"
+  public_base_url: "http://localhost:8080"
+
+auth:
+  bootstrap_admin_key: { file: /run/secrets/admin_api_key }
+
+storage:
+  db_path: /data/proxy.db
+  cache_root: /cache
+
+buckets:
+  - alias: sstate
+    provider: rustfs
+    endpoint: http://rustfs:9000
+    bucket: debug-sstate
+    credentials:
+      access_key_id:     { file: /run/secrets/rustfs_access_key }
+      secret_access_key: { file: /run/secrets/rustfs_secret_key }
+    mode: passthrough
+
+log:
+  level: debug
+  access: true
