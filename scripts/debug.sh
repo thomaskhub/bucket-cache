@@ -34,6 +34,9 @@ wait_for() { # url, name
 make_secrets() {
   mkdir -p secrets
   [ -s secrets/admin_api_key ] || openssl rand -hex 32 > secrets/admin_api_key
+  [ -s secrets/db_encryption_key ] || openssl rand -hex 32 > secrets/db_encryption_key
+  [ -s secrets/initial_admin_user ] || printf admin > secrets/initial_admin_user
+  [ -s secrets/initial_admin_password ] || openssl rand -hex 12 > secrets/initial_admin_password
   printf debug-access-key > secrets/rustfs_access_key
   printf debug-secret-key > secrets/rustfs_secret_key
   chmod 644 secrets/*   # the proxy runs as uid 10001 and must read them
@@ -66,6 +69,10 @@ print_usage() {
 Debug instance is running.
   data:   http://localhost:$DATA_PORT
   admin:  http://localhost:$ADMIN_PORT  (key in deploy/debug/secrets/admin_api_key)
+  web UI: http://localhost:$ADMIN_PORT/
+          user $(cat secrets/initial_admin_user), initial password $(cat secrets/initial_admin_password)
+          (first login: leave the code empty, set up TOTP, then choose a new password;
+          the initial password stops working once changed)
   rustfs: http://localhost:$RUSTFS_PORT  (debug-access-key / debug-secret-key)
 
 Token (12h): $t
