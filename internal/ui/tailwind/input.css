@@ -1,0 +1,45 @@
+/* Source for static/css/app.css. Rebuild with scripts/vendor-ui.sh css
+   after using Tailwind classes that aren't in the built file yet. The
+   component classes below cover the common elements, so new pages can
+   often use them without a rebuild. */
+@import "tailwindcss" source(none);
+@source "../layout.html";
+@source "../static/pages";
+@source "../static/js";
+
+[x-cloak] { display: none !important; }
+
+@layer components {
+  .h1 { @apply mb-4 text-2xl font-semibold tracking-tight; }
+  .h2 { @apply mb-3 text-lg font-semibold; }
+  .card { @apply rounded-lg border border-slate-200 bg-white p-5 shadow-sm; }
+  .field { @apply flex flex-col gap-1 text-sm font-medium text-slate-700; }
+  .input { @apply rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-normal text-slate-900 shadow-sm focus:border-sky-500 focus:ring-2 focus:ring-sky-200 focus:outline-none; }
+  .btn { @apply inline-flex items-center justify-center gap-1 rounded-md px-4 py-2 text-sm font-medium shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-sm { @apply px-2.5 py-1 text-xs; }
+  .btn-primary { @apply bg-sky-700 text-white hover:bg-sky-800; }
+  .btn-secondary { @apply border border-slate-300 bg-white text-slate-800 hover:bg-slate-100; }
+  .btn-danger { @apply bg-red-600 text-white hover:bg-red-700; }
+  .btn-dark { @apply border border-slate-600 bg-slate-800 text-slate-100 hover:bg-slate-700; }
+  .link { @apply text-sky-700 underline hover:text-sky-900; }
+  .nav-link { @apply rounded-md px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800 hover:text-white; }
+  .nav-link-active { @apply bg-slate-700 text-white; }
+  .badge { @apply inline-block rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700; }
+  .badge-dark { @apply bg-slate-700 text-slate-100; }
+  .badge-ok { @apply bg-emerald-100 text-emerald-800; }
+  .badge-error { @apply bg-red-100 text-red-800; }
+  .alert { @apply mb-3 rounded-md border px-3 py-2 text-sm; }
+  .alert-info { @apply border-sky-200 bg-sky-50 text-sky-900; }
+  .alert-success { @apply border-emerald-200 bg-emerald-50 text-emerald-900; }
+  .alert-warning { @apply border-amber-200 bg-amber-50 text-amber-900; }
+  .alert-error { @apply border-red-200 bg-red-50 text-red-900; }
+  .banner-warning { @apply bg-amber-400 px-4 py-2 text-center text-sm font-medium text-amber-950; }
+  .code { @apply rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-800; }
+  .copy-row { @apply flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-2; }
+  .table { @apply w-full text-left text-sm; }
+  .table th { @apply border-b border-slate-200 px-3 py-2 text-xs font-semibold tracking-wide text-slate-500 uppercase; }
+  .table td { @apply border-b border-slate-100 px-3 py-2 align-top; }
+  .stat { @apply flex flex-col rounded-lg border border-slate-200 bg-white p-4 shadow-sm; }
+  .stat-label { @apply text-xs font-medium tracking-wide text-slate-500 uppercase; }
+  .stat-value { @apply mt-1 text-2xl font-semibold; }
+}

@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>yproxy</title>
+  <link rel="icon" href="/static/img/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script defer src="/static/js/app.js"></script>
+{{- range .PageScripts}}
+  <script defer src="/static/{{.}}"></script>
+{{- end}}
+  <script defer src="/static/vendor/alpine-csp.min.js"></script>
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-900 antialiased">
+<div x-data class="min-h-screen flex flex-col">
+
+  <div x-show="$store.app.insecure" class="banner-warning" role="alert" id="http-warning" x-cloak>
+    This page is served over plain HTTP: passwords, session cookies and tokens cross the network unencrypted.
+    Use TLS (built-in or a reverse proxy) on untrusted networks.
+  </div>
+
+  <header class="bg-slate-900 text-white">
+    <div class="mx-auto max-w-6xl px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+      <a href="#/dashboard" class="font-semibold tracking-tight text-lg">yproxy</a>
+      <nav class="flex flex-wrap gap-1" x-show="$store.app.stage === 'ok'" aria-label="Main">
+        <template x-for="p in $store.app.nav()" :key="p.id">
+          <a :href="'#/' + p.id" :class="$store.app.navClass(p.id)" x-text="p.title" :data-nav="p.id"></a>
+        </template>
+      </nav>
+      <div class="ml-auto flex items-center gap-3 text-sm" x-show="$store.app.session">
+        <a href="#/account" class="text-slate-300 hover:text-white" x-show="$store.app.stage === 'ok'">
+          <span x-text="$store.app.username()"></span>
+          <span class="badge badge-dark" x-text="$store.app.role()"></span>
+        </a>
+        <button type="button" class="btn btn-dark btn-sm" id="logout" @click="$store.app.logout()">Log out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
+    <p x-show="!$store.app.ready" class="text-slate-500">Loading…</p>
+
+    <!-- Login (FR-61): password and TOTP code. -->
+    <template x-if="$store.app.ready && $store.app.stage === 'login'">
+      <section x-data="loginForm" class="card mx-auto max-w-sm">
+        <h1 class="h1">Log in</h1>
+        <p x-show="$store.app.notice" class="alert alert-info" x-text="$store.app.notice"></p>
+        <form @submit.prevent="submit()" class="space-y-4" id="login-form">
+          <label class="field"><span>Username</span>
+            <input class="input" name="username" autocomplete="username" required x-model="username"></label>
+          <label class="field"><span>Password</span>
+            <input class="input" name="password" type="password" autocomplete="current-password" required x-model="password"></label>
+          <label class="field"><span>Authenticator code</span>
+            <input class="input" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" x-model="code"
+                   placeholder="6 digits (leave empty on first login)"></label>
+          <p x-show="error" class="alert alert-error" x-text="error" role="alert"></p>
+          <button class="btn btn-primary w-full" type="submit" :disabled="busy">Log in</button>
+        </form>
+      </section>
+    </template>
+
+    <!-- Forced TOTP enrolment: the QR code is shown once. -->
+    <template x-if="$store.app.ready && $store.app.stage === 'totp_enrolment'">
+      <section x-data="enrolForm" class="card mx-auto max-w-lg" id="enrol">
+        <h1 class="h1">Set up two-factor login</h1>
+        <p class="text-sm text-slate-600 mb-4">Scan the QR code with an authenticator app (any app that supports TOTP), then enter the
+          6-digit code it shows. This code is shown only now.</p>
+        <div class="flex flex-col items-center gap-3" x-show="qr">
+          <img :src="qr" alt="TOTP QR code" width="256" height="256" class="border border-slate-200 rounded" id="totp-qr">
+          <button type="button" class="link text-sm" @click="toggleSecret()">Can't scan? Show the key</button>
+          <div x-show="showSecret" class="w-full space-y-1 text-sm">
+            <p>Key: <code class="code break-all" id="totp-secret" x-text="secret"></code></p>
+            <p class="text-slate-500 break-all">URI: <code class="code" x-text="uri"></code></p>
+          </div>
+        </div>
+        <form @submit.prevent="confirm()" class="mt-4 space-y-4" id="enrol-form">
+          <label class="field"><span>Code from the app</span>
+            <input class="input" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required x-model="code"></label>
+          <p x-show="error" class="alert alert-error" x-text="error" role="alert"></p>
+          <button class="btn btn-primary w-full" type="submit" :disabled="busy">Confirm</button>
+        </form>
+      </section>
+    </template>
+
+    <!-- Forced password change after first login or a reset. -->
+    <template x-if="$store.app.ready && $store.app.stage === 'password_change'">
+      <section x-data="passwordForm" class="card mx-auto max-w-sm" id="password-change">
+        <h1 class="h1">Choose a new password</h1>
+        <p class="text-sm text-slate-600 mb-4">Your password was set by an admin or at installation. Choose your own (at least 12 characters).</p>
+        {{template "passwordFields"}}
+      </section>
+    </template>
+
+    <template x-if="$store.app.stage === 'ok' && $store.app.page === 'account'">
+      <section x-data="passwordForm" class="card max-w-sm" id="account">
+        <h1 class="h1">Change password</h1>
+        <p x-show="done" class="alert alert-success">Your password was changed. Other sessions were logged out.</p>
+        {{template "passwordFields"}}
+      </section>
+    </template>
+
+{{- range .Pages}}
+    <template x-if="$store.app.showing('{{.ID}}')">
+      <div x-data="page_{{.ID}}" data-page="{{.ID}}">
+{{.Markup}}
+      </div>
+    </template>
+{{- end}}
+
+    <template x-if="$store.app.unknownPage()">
+      <section class="card"><h1 class="h1">Not found</h1><p><a class="link" href="#/dashboard">Back to the dashboard</a></p></section>
+    </template>
+  </main>
+
+  <footer class="mx-auto w-full max-w-6xl px-4 py-4 text-xs text-slate-400">yproxy · S3 and git caching proxy for Yocto builds</footer>
+</div>
+</body>
+</html>
+{{define "passwordFields"}}
+        <form @submit.prevent="submit()" class="space-y-4" id="password-form">
+          <input type="text" name="username" autocomplete="username" class="hidden" :value="$store.app.username()">
+          <label class="field"><span>Current password</span>
+            <input class="input" name="current" type="password" autocomplete="current-password" required x-model="current"></label>
+          <label class="field"><span>New password</span>
+            <input class="input" name="new" type="password" autocomplete="new-password" minlength="12" required x-model="next"></label>
+          <label class="field"><span>Repeat new password</span>
+            <input class="input" name="repeat" type="password" autocomplete="new-password" minlength="12" required x-model="repeat"></label>
+          <p x-show="error" class="alert alert-error" x-text="error" role="alert"></p>
+          <button class="btn btn-primary w-full" type="submit" :disabled="busy">Change password</button>
+        </form>
+{{end}}

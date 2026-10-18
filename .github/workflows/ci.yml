@@ -28,6 +28,8 @@ jobs:
           go-version-file: go.mod
       - run: go vet ./...
       - run: go test -race ./...
+        env:
+          YPROXY_BROWSER_TEST: require # the UI browser test uses the runner's Chrome
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.14

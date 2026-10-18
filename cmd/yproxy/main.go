@@ -24,6 +24,7 @@ import (
 	"github.com/thomaskhub/bucket-cache/internal/s3proxy"
 	"github.com/thomaskhub/bucket-cache/internal/server"
 	"github.com/thomaskhub/bucket-cache/internal/store"
+	"github.com/thomaskhub/bucket-cache/internal/ui"
 	"github.com/thomaskhub/bucket-cache/internal/version"
 )
 
@@ -33,6 +34,7 @@ Commands:
   serve          run the proxy
   config check   validate the config and its secret files without starting
   healthcheck    exit 0 if the local admin listener answers /healthz (for Docker)
+  user           manage web UI users: create, reset-password, reset-totp, list
   version        print the version
 
 Flags:
@@ -49,6 +51,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	cmd, rest := args[0], args[1:]
+	if cmd == "user" {
+		return userCommand(rest, stdout, stderr)
+	}
 	if cmd == "config" {
 		if len(rest) == 0 || rest[0] != "check" {
 			fmt.Fprint(stderr, usage)
@@ -120,12 +125,24 @@ func serve(cfgPath string, stderr io.Writer) int {
 	}
 	defer st.Close()
 
+	userSvc, err := setupUsers(ctx, cfg, st, log)
+	if err != nil {
+		log.Error("setting up users failed", "error", err.Error())
+		return 1
+	}
+	webUI, err := ui.New()
+	if err != nil {
+		log.Error("loading the web UI failed", "error", err.Error())
+		return 1
+	}
+
 	reg := metrics.NewRegistry()
 	authn := auth.New(st, log, cfg.Auth.BootstrapAdminKey.Value(), cfg.Auth.ValidationCacheTTL.D())
 	maintCtx, stopMaint := context.WithCancel(context.Background())
 	maintDone := make(chan struct{})
 	go func() { authn.RunMaintenance(maintCtx, 10*time.Second); close(maintDone) }()
 	go reportActiveTokens(ctx, st, reg, log)
+	go userSvc.RunMaintenance(ctx, 10*time.Minute)
 
 	backends := map[string]s3proxy.Backend{}
 	for _, b := range cfg.Buckets {
@@ -134,7 +151,8 @@ func serve(cfgPath string, stderr io.Writer) int {
 	objects := s3proxy.NewHandler(backends, authn, log, reg, cfg.Log.Access)
 
 	srv := server.New(cfg, log, reg, server.WithRoute(objects), server.WithPing(st.Ping))
-	api.New(cfg, st, authn, backends, log).Register(srv.Admin)
+	api.New(cfg, st, authn, backends, log).WithUsers(userSvc).Register(srv.Admin)
+	webUI.Register(srv.Admin)
 
 	runErr := srv.Run(ctx)
 	stopMaint()
