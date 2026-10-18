@@ -3,6 +3,7 @@ package gitmirror
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/thomaskhub/bucket-cache/internal/config"
 )
@@ -673,5 +676,72 @@ func TestEvictionAndRestart(t *testing.T) {
 	if e.metric("yproxy_git_evictions_total", map[string]string{"reason": "unused"}) != 1 ||
 		e.metric("yproxy_git_evictions_total", map[string]string{"reason": "size"}) != 1 {
 		t.Fatal("eviction metrics")
+	}
+}
+
+// TestAllowAPI checks allowlist entries added at runtime: they take effect
+// at once, survive a restart, and config patterns stay read-only.
+func TestAllowAPI(t *testing.T) {
+	up := newUpstream(t)
+	up.newRepo("xilinx", "linux-xlnx")
+	e := newEnv(t, up, envOpts{})
+	tok := e.token("*/*")
+	u := e.url(tok, "Xilinx/linux-xlnx")
+
+	if _, err := clientGit(t, 2, "", "ls-remote", u); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("repo outside the allowlist: %v", err)
+	}
+	for _, bad := range []string{`{"pattern":"*/*"}`, `{"pattern":"*/linux"}`, `{"pattern":"xilinx"}`, `{"pattern":"a/b/c"}`} {
+		if resp, body := e.adminDoBody("POST", "/api/v1/git/remotes/test/allow", e.adminKey, bad); resp.StatusCode != 400 {
+			t.Fatalf("%s: %d %s", bad, resp.StatusCode, body)
+		}
+	}
+	if resp, _ := e.adminDoBody("POST", "/api/v1/git/remotes/test/allow", e.adminKey, `{"pattern":"ACME/*"}`); resp.StatusCode != 409 {
+		t.Fatalf("pattern already in the config: %d", resp.StatusCode)
+	}
+	if resp, _ := e.adminDoBody("POST", "/api/v1/git/remotes/nope/allow", e.adminKey, `{"pattern":"xilinx/*"}`); resp.StatusCode != 404 {
+		t.Fatalf("unknown remote: %d", resp.StatusCode)
+	}
+	resp, body := e.adminDoBody("POST", "/api/v1/git/remotes/test/allow", e.adminKey, `{"pattern":"Xilinx/*"}`)
+	if resp.StatusCode != 201 || !strings.Contains(body, `"created_by":"bootstrap"`) {
+		t.Fatalf("add: %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := e.adminDoBody("POST", "/api/v1/git/remotes/test/allow", e.adminKey, `{"pattern":"xilinx/*"}`); resp.StatusCode != 409 {
+		t.Fatalf("duplicate (other case): %d", resp.StatusCode)
+	}
+	mustClient(t, 2, "", "ls-remote", u)
+
+	_, body = e.adminDo("GET", "/api/v1/repos", e.adminKey)
+	var list struct {
+		Remotes []remoteInfo `json:"remotes"`
+	}
+	if err := json.Unmarshal([]byte(body), &list); err != nil {
+		t.Fatal(err)
+	}
+	rm := list.Remotes[0]
+	if strings.Join(rm.Allow, ",") != "acme/*,solo/one,Xilinx/*" || len(rm.AllowConfig) != 2 || len(rm.AllowExtra) != 1 || !rm.AllowEditable {
+		t.Fatalf("remote info: %+v", rm)
+	}
+
+	// A new manager on the same database sees the entry.
+	mgr2, err := New(context.Background(), e.cfg.Git, Options{Registerer: prometheus.NewRegistry(), AllowStore: e.st})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !mgr2.Allowed("test", "xilinx", "anything") {
+		t.Fatal("runtime entry lost after restart")
+	}
+
+	if resp, _ := e.adminDo("DELETE", "/api/v1/git/remotes/test/allow?pattern=acme/*", e.adminKey); resp.StatusCode != 404 {
+		t.Fatalf("deleting a config pattern: %d", resp.StatusCode)
+	}
+	if resp, _ := e.adminDo("DELETE", "/api/v1/git/remotes/test/allow?pattern=xilinx/*", e.adminKey); resp.StatusCode != 204 {
+		t.Fatalf("delete: %d", resp.StatusCode)
+	}
+	if e.mgr.Allowed("test", "xilinx", "linux-xlnx") {
+		t.Fatal("still allowed after delete")
+	}
+	if resp, _ := e.adminDo("DELETE", "/api/v1/git/remotes/test/allow?pattern=xilinx/*", e.adminKey); resp.StatusCode != 404 {
+		t.Fatalf("second delete: %d", resp.StatusCode)
 	}
 }

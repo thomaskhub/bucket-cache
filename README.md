@@ -87,8 +87,8 @@ http(s)://proxy/t/{token}/git/{remote}/{owner}/{repo}.git # token in the path
 ```
 
 `.git` is optional, `owner/repo` is case-insensitive and `//` is accepted.
-Only repos matching the remote's `allow` patterns are served (others get
-`404`), a token only reads the repos in its `git` scope (`403` otherwise),
+Only repos matching the remote's `allow` patterns (from the config file, or
+added by an admin on the Repositories page) are served (others get `404`), a token only reads the repos in its `git` scope (`403` otherwise),
 and push gets `403`. The first request for a repo clones it into a bare
 mirror under `git.storage`; later requests are served from the mirror after
 a quick `ls-remote` check of upstream (cached for `ls_remote_cache`, 3 s),

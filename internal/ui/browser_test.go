@@ -187,15 +187,15 @@ git:
 	if err != nil {
 		t.Fatal(err)
 	}
-	mirrors, err := gitmirror.New(context.Background(), cfg.Git, gitmirror.Options{PublicBaseURL: cfg.Server.PublicBaseURL})
-	if err != nil {
-		t.Fatal(err)
-	}
 	st, err := store.Open(context.Background(), filepath.Join(dir, "p.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
+	mirrors, err := gitmirror.New(context.Background(), cfg.Git, gitmirror.Options{PublicBaseURL: cfg.Server.PublicBaseURL, AllowStore: st})
+	if err != nil {
+		t.Fatal(err)
+	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	authn := auth.New(st, log, "", time.Second)
 	sealer, _ := auth.NewSealer("browser-test-master-key-1234")
@@ -217,6 +217,7 @@ git:
 	apiSrv := api.New(cfg, st, authn, backends, log).WithUsers(svc).WithCaches(caches)
 	apiSrv.Register(mux)
 	mirrors.RegisterAPI(mux, apiSrv.Authenticated, apiSrv.AdminOnly)
+	mirrors.RegisterAllowAPI(mux, apiSrv.AdminActor)
 	h, err := ui.New()
 	if err != nil {
 		t.Fatal(err)
@@ -460,6 +461,25 @@ git:
 		chromedp.Click(chromedp.CSS(`#repos-table button[data-action=delete]`)),
 		chromedp.WaitVisible(chromedp.CSS(`#repos-empty`)),
 	)
+	run("allow pattern",
+		chromedp.SendKeys(chromedp.CSS(`#allow-form input[name=pattern]`), "Xilinx/*"),
+		chromedp.Click(chromedp.CSS(`#allow-form button[type=submit]`)),
+		chromedp.WaitVisible(chromedp.CSS(`.allow-table tr[data-pattern="Xilinx/*"] button[data-action=disallow]`)),
+	)
+	waitText(`#repos-notice`, "Allowed Xilinx/*")
+	waitText(`.allow-table tr[data-pattern="Xilinx/*"] td:nth-child(2)`, "added by admin")
+	if !mirrors.Allowed("test", "xilinx", "linux-xlnx") {
+		t.Fatal("pattern added in the UI not applied")
+	}
+	shot("6b-allow")
+	run("remove pattern",
+		chromedp.Click(chromedp.CSS(`.allow-table tr[data-pattern="Xilinx/*"] button[data-action=disallow]`)),
+		chromedp.Click(chromedp.CSS(`.allow-table tr[data-pattern="Xilinx/*"] button[data-action=disallow]`)),
+	)
+	waitText(`#repos-notice`, "Removed Xilinx/*")
+	if mirrors.Allowed("test", "xilinx", "linux-xlnx") {
+		t.Fatal("pattern removed in the UI still applied")
+	}
 	// Without git remotes in the session the nav entry is hidden.
 	hidden, err := chromedp.Run(ctx, chromedp.Evaluate[bool](`(function () {
 		var a = Alpine.store('app'), s = a.session;

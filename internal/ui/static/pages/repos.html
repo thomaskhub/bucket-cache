@@ -31,6 +31,44 @@
   </div>
 </section>
 
+<section class="card mb-6" x-show="isAdmin()" id="allow-section">
+  <h2 class="h2">Allowed repositories</h2>
+  <p class="text-sm text-slate-600 mb-3">Only repositories that match a pattern here are mirrored; others get "not found".
+    Use <code class="code">owner/*</code> for every repository of an owner. Changes apply at once.</p>
+  <template x-for="rm in remotes" :key="rm.name">
+    <div class="mb-4">
+      <p class="text-sm font-medium mb-1" x-show="remotes.length > 1"><span x-text="rm.name"></span> (<span x-text="rm.url"></span>)</p>
+      <p class="text-slate-500 text-sm" x-show="rm.allow.length === 0">Nothing is allowed yet.</p>
+      <div class="overflow-x-auto" x-show="rm.allow.length > 0">
+        <table class="table allow-table" :data-remote="rm.name">
+          <thead><tr><th>Pattern</th><th>Source</th><th></th></tr></thead>
+          <tbody>
+            <template x-for="p in allowRows(rm)" :key="p.pattern">
+              <tr :data-pattern="p.pattern">
+                <td><code class="code" x-text="p.pattern"></code></td>
+                <td class="text-sm text-slate-600" x-text="p.source"></td>
+                <td class="whitespace-nowrap">
+                  <button type="button" class="btn btn-danger btn-sm" data-action="disallow" x-show="p.removable"
+                    :disabled="allowBusy()" @click="disallow(rm, p)" x-text="disallowLabel(rm, p)"></button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </template>
+  <form @submit.prevent="allow()" class="flex flex-wrap items-end gap-4" id="allow-form" x-show="editable()">
+    <label class="field" x-show="remotes.length > 1"><span>Remote</span>
+      <select class="input" name="remote" x-model="allowRemote">
+        <template x-for="rm in remotes" :key="rm.name"><option :value="rm.name" x-text="rm.name"></option></template>
+      </select></label>
+    <label class="field"><span>Pattern</span><input class="input" name="pattern" x-model="allowPattern" placeholder="owner/* or owner/repo" required></label>
+    <button class="btn btn-primary" type="submit" :disabled="allowBusy()">Allow</button>
+  </form>
+  <p x-show="allowError" class="alert alert-error mt-3" x-text="allowError" role="alert"></p>
+</section>
+
 <section class="card mb-6" x-show="isAdmin()">
   <h2 class="h2">Mirror a repository now</h2>
   <form @submit.prevent="add()" class="flex flex-wrap items-end gap-4" id="repo-form">
@@ -51,7 +89,7 @@
   <template x-for="rm in remotes" :key="rm.name">
     <div class="mb-4">
       <p class="text-sm font-medium mb-1"><span x-text="rm.name"></span> (<span x-text="rm.url"></span>), allowed:
-        <span class="font-normal" x-text="rm.allow.join(', ')"></span></p>
+        <span class="font-normal" x-text="allowText(rm)"></span></p>
       <div class="copy-row" x-show="gitConfig(rm)">
         <pre class="code flex-1 whitespace-pre-wrap break-all" x-text="gitConfig(rm)"></pre>
         <button type="button" class="btn btn-secondary btn-sm" x-data="copyButton" :data-copy="gitConfig(rm)" @click="copy()" x-text="label"></button>
