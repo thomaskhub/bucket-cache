@@ -12,10 +12,12 @@
 
   // YP is the small global the page scripts use.
   var YP = (window.YP = {
-    // page registers a page: meta {id, title, role: 'user'|'admin', order}
-    // and a function returning its Alpine component.
+    // page registers a page: meta {id, title, role: 'user'|'admin', order,
+    // visible} and a function returning its Alpine component. visible is an
+    // optional function(session) that hides the page when it returns false
+    // (for example when a feature isn't configured).
     page: function (meta, factory) {
-      pages.push({ id: meta.id, title: meta.title, role: meta.role || 'user', order: meta.order || 100 });
+      pages.push({ id: meta.id, title: meta.title, role: meta.role || 'user', order: meta.order || 100, visible: meta.visible });
       factories[meta.id] = factory;
     },
 
@@ -141,17 +143,21 @@
 
       // nav lists the pages the user's role may see, in order.
       nav: function () {
-        var admin = this.isAdmin();
+        var self = this;
         return pages
-          .filter(function (p) { return p.role !== 'admin' || admin; })
+          .filter(function (p) { return self.allowed(p); })
           .sort(function (a, b) { return a.order - b.order || a.title.localeCompare(b.title); });
+      },
+      allowed: function (p) {
+        if (p.role === 'admin' && !this.isAdmin()) return false;
+        return !p.visible || !!p.visible(this.session);
       },
       navClass: function (id) { return this.page === id ? 'nav-link nav-link-active' : 'nav-link'; },
       // showing reports whether page id is the current page and allowed.
       showing: function (id) {
         if (this.stage !== 'ok' || this.page !== id) return false;
         var p = pages.filter(function (x) { return x.id === id; })[0];
-        return !!p && (p.role !== 'admin' || this.isAdmin());
+        return !!p && this.allowed(p);
       },
       unknownPage: function () {
         if (this.stage !== 'ok') return false;

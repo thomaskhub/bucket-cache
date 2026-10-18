@@ -6,6 +6,10 @@ server:
 
 auth:
   bootstrap_admin_key: { file: /run/secrets/admin_api_key }
+  # Web UI admin, created on first start (scripts/debug.sh generates these).
+  initial_admin_user:     { file: /run/secrets/initial_admin_user }
+  initial_admin_password: { file: /run/secrets/initial_admin_password }
+  db_encryption_key:      { file: /run/secrets/db_encryption_key }
 
 storage:
   db_path: /data/proxy.db

@@ -44,7 +44,7 @@ func TestIndexAndHeaders(t *testing.T) {
 	}
 	// Every page file is mounted with its script, and there is no inline
 	// script or style (the CSP would block it).
-	for _, id := range []string{"dashboard", "tokens", "apikeys", "buckets", "users"} {
+	for _, id := range []string{"dashboard", "tokens", "apikeys", "buckets", "repos", "users"} {
 		if !strings.Contains(html, `x-data="page_`+id+`"`) || !strings.Contains(html, `src="/static/js/pages/`+id+`.js"`) {
 			t.Errorf("page %s not assembled", id)
 		}
@@ -57,10 +57,10 @@ func TestIndexAndHeaders(t *testing.T) {
 	}
 
 	for path, ctype := range map[string]string{
-		"/static/js/app.js":                  "text/javascript",
-		"/static/vendor/alpine-csp.min.js":   "text/javascript",
-		"/static/css/app.css":                "text/css",
-		"/static/img/icon.svg":               "image/svg+xml",
+		"/static/js/app.js":                   "text/javascript",
+		"/static/vendor/alpine-csp.min.js":    "text/javascript",
+		"/static/css/app.css":                 "text/css",
+		"/static/img/icon.svg":                "image/svg+xml",
 		"/static/vendor/LICENSE-alpinejs.txt": "",
 	} {
 		res, err := http.Get(srv.URL + path)

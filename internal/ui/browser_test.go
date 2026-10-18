@@ -17,6 +17,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/cgi"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -33,6 +34,7 @@ import (
 	"github.com/thomaskhub/bucket-cache/internal/api"
 	"github.com/thomaskhub/bucket-cache/internal/auth"
 	"github.com/thomaskhub/bucket-cache/internal/config"
+	"github.com/thomaskhub/bucket-cache/internal/gitmirror"
 	"github.com/thomaskhub/bucket-cache/internal/s3proxy"
 	"github.com/thomaskhub/bucket-cache/internal/store"
 	"github.com/thomaskhub/bucket-cache/internal/ui"
@@ -68,6 +70,44 @@ func (fakeBackend) Head(context.Context, string, s3proxy.Conditions) (*s3proxy.O
 }
 func (fakeBackend) Test(context.Context) error { return nil }
 
+// newGitUpstream serves a bare repo acme/app with `git http-backend`, like
+// a tiny GitHub, and returns its base URL.
+func newGitUpstream(t *testing.T) string {
+	t.Helper()
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not installed")
+	}
+	// The test servers are on 127.0.0.1; don't send git through a proxy.
+	for _, k := range []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"} {
+		t.Setenv(k, "")
+	}
+	root, home := t.TempDir(), t.TempDir()
+	env := []string{"HOME=" + home, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull,
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com"}
+	git := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(gitBin, args...)
+		cmd.Dir, cmd.Env = dir, append(env, "PATH="+os.Getenv("PATH"))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	bare := filepath.Join(root, "acme", "app.git")
+	git("", "init", "--quiet", "--bare", "--initial-branch=main", bare)
+	work := t.TempDir()
+	git(work, "init", "--quiet", "--initial-branch=main")
+	os.WriteFile(filepath.Join(work, "README"), []byte("hello\n"), 0o600)
+	git(work, "add", "-A")
+	git(work, "commit", "--quiet", "-m", "first")
+	git(work, "push", "--quiet", bare, "main")
+	h := &cgi.Handler{Path: gitBin, Args: []string{"http-backend"}, Stderr: io.Discard,
+		Env: append(env, "GIT_PROJECT_ROOT="+root, "GIT_HTTP_EXPORT_ALL=1")}
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
 type offsetClock struct {
 	mu  sync.Mutex
 	off time.Duration
@@ -93,6 +133,7 @@ func TestBrowserLoginAndTokens(t *testing.T) {
 	dir := t.TempDir()
 	sec := filepath.Join(dir, "s")
 	os.WriteFile(sec, []byte("SECRET"), 0o600)
+	upstream := newGitUpstream(t)
 	cfg, err := config.Parse([]byte(`
 server: { public_base_url: "http://cache.lan:8080" }
 buckets:
@@ -101,7 +142,17 @@ buckets:
     endpoint: http://s3.lan
     bucket: b
     credentials: { access_key_id: { file: `+sec+` }, secret_access_key: { file: `+sec+` } }
+git:
+  storage: `+filepath.Join(dir, "git")+`
+  remotes:
+    - name: test
+      url: `+upstream+`
+      allow: ["acme/*"]
 `), func(string) (string, bool) { return "", false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	mirrors, err := gitmirror.New(context.Background(), cfg.Git, gitmirror.Options{PublicBaseURL: cfg.Server.PublicBaseURL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +171,9 @@ buckets:
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	api.New(cfg, st, authn, map[string]s3proxy.Backend{"sstate": fakeBackend{}}, log).WithUsers(svc).Register(mux)
+	apiSrv := api.New(cfg, st, authn, map[string]s3proxy.Backend{"sstate": fakeBackend{}}, log).WithUsers(svc)
+	apiSrv.Register(mux)
+	mirrors.RegisterAPI(mux, apiSrv.Authenticated, apiSrv.AdminOnly)
 	h, err := ui.New()
 	if err != nil {
 		t.Fatal(err)
@@ -331,8 +384,47 @@ buckets:
 		t.Fatalf("created user: %+v, %v", u, err)
 	}
 
+	// 7. Repositories (FR-92): mirror a repo, refresh it, delete it.
+	waitText := func(sel, prefix string) {
+		t.Helper()
+		for i := 0; i < 100; i++ {
+			if v, err := chromedp.Run(ctx, chromedp.Evaluate[string](`(document.querySelector('`+sel+`')||{}).innerText||''`)); err == nil && strings.HasPrefix(strings.TrimSpace(v), prefix) {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		fail("wait for "+sel+" = "+prefix+"…", errors.New("timeout"))
+	}
+	run("repos page",
+		chromedp.Click(chromedp.CSS(`a[data-nav=repos]`)),
+		chromedp.WaitVisible(chromedp.CSS(`#repos-empty`)),
+		chromedp.SendKeys(chromedp.CSS(`#repo-form input[name=repo]`), "acme/app"),
+		chromedp.Click(chromedp.CSS(`#repo-form button[type=submit]`)),
+		chromedp.WaitVisible(chromedp.CSS(`#repos-table tr[data-repo="test/acme/app"]`)),
+	)
+	waitText(`#repos-notice`, "Mirrored test/acme/app")
+	shot("6-repos")
+	run("refresh repo", chromedp.Click(chromedp.CSS(`#repos-table button[data-action=refresh]`)))
+	waitText(`#repos-notice`, "Refreshed test/acme/app")
+	run("delete repo",
+		chromedp.Click(chromedp.CSS(`#repos-table button[data-action=delete]`)),
+		chromedp.Click(chromedp.CSS(`#repos-table button[data-action=delete]`)),
+		chromedp.WaitVisible(chromedp.CSS(`#repos-empty`)),
+	)
+	// Without git remotes in the session the nav entry is hidden.
+	hidden, err := chromedp.Run(ctx, chromedp.Evaluate[bool](`(function () {
+		var a = Alpine.store('app'), s = a.session;
+		a.session = Object.assign({}, s, { git_remotes: [] });
+		var hidden = !a.nav().some(function (p) { return p.id === 'repos'; });
+		a.session = s;
+		return hidden;
+	})()`))
+	if err != nil || !hidden {
+		t.Fatalf("repos nav entry without git: hidden=%v err=%v", hidden, err)
+	}
+
 	// Visit every page once so their scripts run under the CSP.
-	for _, p := range []string{"dashboard", "apikeys", "buckets", "account"} {
+	for _, p := range []string{"dashboard", "apikeys", "buckets", "repos", "account"} {
 		run("page "+p, chromedp.Navigate(srv.URL+"/#/"+p), chromedp.WaitVisible(chromedp.CSS(`main h1`)), chromedp.Sleep(200*time.Millisecond))
 		shot("5-" + p)
 	}

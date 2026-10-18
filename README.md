@@ -146,7 +146,8 @@ accepted as command-line arguments. In Docker: `docker exec -it yproxy yproxy us
 The UI is served on the admin listener at `/` (for example
 `http://cache.lan:8081/`). It has pages for the dashboard, tokens (CI and
 personal tokens, shown once with copy buttons), API keys, buckets (with a
-connection test) and users. All assets (Alpine.js, Tailwind CSS) are embedded,
+connection test), repositories (git mirrors with refresh and delete, shown when
+git is configured) and users. All assets (Alpine.js, Tailwind CSS) are embedded,
 so it works without internet access, and it uses only the `/api/v1` endpoints.
 
 - **First start:** if there are no users, the admin is created from the
@@ -184,7 +185,7 @@ The UI login endpoints are `POST /api/v1/session` (login), `GET` and `DELETE`
 
 **Changing the UI:** pages live in `internal/ui/static/pages/<id>.html` with a
 script `internal/ui/static/js/pages/<id>.js` that calls `YP.page({id, title,
-role, order}, factory)`; both are picked up automatically, including the nav
+role, order, visible}, factory)` (`visible(session)` can hide a page); both are picked up automatically, including the nav
 entry. The vendored files are fetched by `scripts/vendor-ui.sh` (pinned
 versions); run `scripts/vendor-ui.sh css` after using Tailwind classes that
 are not in `internal/ui/static/css/app.css` yet.
@@ -214,7 +215,8 @@ reverse proxy when traffic crosses untrusted networks.
 `scripts/debug.sh` starts a throwaway instance on localhost: the proxy with
 debug and access logging, a RustFS server with a `debug-sstate` bucket and a
 test object, and a 12-hour build token. It prints the token, curl examples and
-the `SSTATE_MIRRORS` line for `local.conf`.
+the `SSTATE_MIRRORS` line for `local.conf`, plus the web UI URL and the
+generated initial admin login (`deploy/debug/secrets/initial_admin_*`).
 
 ```sh
 scripts/debug.sh          # build and start (Podman, or Docker if Podman is missing)
