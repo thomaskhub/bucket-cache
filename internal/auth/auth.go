@@ -72,9 +72,13 @@ func LooksLikeToken(s string) bool {
 
 // Principal is who is calling the management API.
 type Principal struct {
-	KeyID   string         // API key ID, or "bootstrap"
-	Role    string         // admin | token-issuer
+	KeyID   string         // API key ID, "bootstrap", or the user ID for a UI session
+	Role    string         // admin | token-issuer | user
 	Ceiling *store.Ceiling // nil = unlimited (admin)
+
+	// UserID and Username are set when the caller is a logged-in UI user.
+	UserID   string
+	Username string
 }
 
 // IsAdmin reports whether the principal has the admin role.

@@ -38,8 +38,9 @@ type Server struct {
 	// Admin is the handler for the UI and management API.
 	Admin *http.ServeMux
 
-	routes []Route
-	ping   func(context.Context) error
+	routes  []Route
+	ping    func(context.Context) error
+	details map[string]func() any
 }
 
 // Route is a data-plane handler that claims its own paths. Routes bypass
@@ -57,6 +58,17 @@ func WithRoute(r Route) Option { return func(s *Server) { s.routes = append(s.ro
 
 // WithPing adds a database check to /readyz.
 func WithPing(f func(context.Context) error) Option { return func(s *Server) { s.ping = f } }
+
+// WithReadyDetail adds informational state under "details" in /readyz. It
+// doesn't affect readiness (for example stale git mirrors, FR-87).
+func WithReadyDetail(name string, f func() any) Option {
+	return func(s *Server) {
+		if s.details == nil {
+			s.details = map[string]func() any{}
+		}
+		s.details[name] = f
+	}
+}
 
 // New builds a server from a loaded config.
 func New(cfg *config.Config, log *slog.Logger, reg *prometheus.Registry, opts ...Option) *Server {
@@ -191,7 +203,15 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	if !ready {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"ready": ready, "checks": checks})
+	body := map[string]any{"ready": ready, "checks": checks}
+	if len(s.details) > 0 {
+		d := map[string]any{}
+		for name, f := range s.details {
+			d[name] = f()
+		}
+		body["details"] = d
+	}
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 func writable(name, dir string) check {

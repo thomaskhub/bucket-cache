@@ -1,0 +1,89 @@
+<h1 class="h1">Tokens</h1>
+
+<section class="card mb-6" x-show="created" id="token-created">
+  <h2 class="h2">Token created</h2>
+  <p class="alert alert-warning">Copy the token now. It is shown only once and can't be retrieved later.</p>
+  <div class="space-y-3">
+    <div class="copy-row">
+      <code class="code flex-1 break-all" id="token-value" x-text="created ? created.token : ''"></code>
+      <button type="button" class="btn btn-secondary btn-sm" x-data="copyButton" :data-copy="created ? created.token : ''" @click="copy()" x-text="label"></button>
+    </div>
+    <div class="copy-row">
+      <code class="code flex-1 break-all" x-text="envLine()"></code>
+      <button type="button" class="btn btn-secondary btn-sm" x-data="copyButton" :data-copy="envLine()" @click="copy()" x-text="label"></button>
+    </div>
+    <div class="copy-row" x-show="hasExample('sstate_mirrors')">
+      <code class="code flex-1 break-all" x-text="example('sstate_mirrors')"></code>
+      <button type="button" class="btn btn-secondary btn-sm" x-data="copyButton" :data-copy="example('sstate_mirrors')" @click="copy()" x-text="label"></button>
+    </div>
+    <p class="text-sm text-slate-600">ID <code class="code" x-text="created ? created.id : ''"></code>,
+      expires <span x-text="created ? fmt(created.expires_at) : ''"></span>.</p>
+    <button type="button" class="btn btn-primary btn-sm" id="token-dismiss" @click="dismiss()">I have copied it</button>
+  </div>
+</section>
+
+<section class="card mb-6">
+  <h2 class="h2">New token</h2>
+  <form @submit.prevent="create()" class="grid gap-4 md:grid-cols-2" id="token-form">
+    <fieldset class="field md:col-span-2">
+      <legend class="mb-1 text-sm font-medium">Kind</legend>
+      <div class="flex gap-6 text-sm">
+        <label class="flex items-center gap-2"><input type="radio" name="kind" value="ci" x-model="kind"> CI token (short-lived, for one build)</label>
+        <label class="flex items-center gap-2"><input type="radio" name="kind" value="personal" x-model="kind"> Personal token (long-lived, for your own builds and git)</label>
+      </div>
+    </fieldset>
+    <label class="field md:col-span-2"><span>Description</span>
+      <input class="input" name="description" x-model="description" placeholder="e.g. pipeline 4711 or my laptop"></label>
+    <fieldset class="field">
+      <legend class="mb-1 text-sm font-medium">Buckets</legend>
+      <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        <label class="flex items-center gap-2"><input type="checkbox" value="*" x-model="selBuckets"> all</label>
+        <template x-for="b in buckets" :key="b">
+          <label class="flex items-center gap-2"><input type="checkbox" :value="b" x-model="selBuckets" :name="'bucket-' + b"> <span x-text="b"></span></label>
+        </template>
+      </div>
+    </fieldset>
+    <label class="field"><span>Key prefixes (optional)</span>
+      <input class="input" name="prefixes" x-model="prefixes" placeholder="comma separated"></label>
+    <div class="field" x-show="hasRemotes()">
+      <span>Git repos (optional)</span>
+      <div class="flex gap-2">
+        <select class="input w-36" name="git-remote" x-model="gitRemote">
+          <template x-for="r in remotes" :key="r"><option :value="r" x-text="r"></option></template>
+        </select>
+        <input class="input flex-1" name="git-repos" x-model="gitRepos" placeholder="owner/repo, owner/*">
+      </div>
+    </div>
+    <label class="field"><span>Lifetime</span>
+      <input class="input" name="ttl" x-model="ttl" placeholder="e.g. 12h or 30d">
+      <small class="text-slate-500" x-text="ttlHint()"></small></label>
+    <p x-show="formError" class="alert alert-error md:col-span-2" x-text="formError" role="alert"></p>
+    <div class="md:col-span-2"><button class="btn btn-primary" type="submit" :disabled="busy">Create token</button></div>
+  </form>
+</section>
+
+<section class="card">
+  <h2 class="h2">Active tokens</h2>
+  <p x-show="error" class="alert alert-error" x-text="error"></p>
+  <p x-show="!loading && tokens.length === 0" class="text-slate-500 text-sm" id="tokens-empty">No active tokens.</p>
+  <div class="overflow-x-auto" x-show="tokens.length > 0">
+    <table class="table" id="tokens-table">
+      <thead><tr><th>ID</th><th>Kind</th><th>Description</th><th>Scope</th><th>Created by</th><th>Expires</th><th>Last used</th><th>Requests</th><th></th></tr></thead>
+      <tbody>
+        <template x-for="t in tokens" :key="t.id">
+          <tr :data-token="t.id">
+            <td><code class="code" x-text="t.id"></code></td>
+            <td><span class="badge" x-text="t.kind"></span></td>
+            <td x-text="t.description"></td>
+            <td class="text-xs" x-text="scope(t)"></td>
+            <td x-text="creator(t)"></td>
+            <td x-text="fmt(t.expires_at)"></td>
+            <td x-text="fmt(t.last_used_at)"></td>
+            <td x-text="t.requests"></td>
+            <td><button type="button" class="btn btn-danger btn-sm" data-action="revoke" @click="revoke(t)" x-text="revokeLabel(t)"></button></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</section>

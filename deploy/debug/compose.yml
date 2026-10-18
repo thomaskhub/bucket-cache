@@ -25,10 +25,13 @@ services:
       - yproxy-cache:/cache
       - yproxy-git:/git
     tmpfs: ["/tmp"]
-    secrets: [admin_api_key, rustfs_access_key, rustfs_secret_key]
+    secrets: [admin_api_key, initial_admin_user, initial_admin_password, db_encryption_key, rustfs_access_key, rustfs_secret_key]
 
 secrets:
   admin_api_key:     { file: ./secrets/admin_api_key }
+  initial_admin_user:     { file: ./secrets/initial_admin_user }
+  initial_admin_password: { file: ./secrets/initial_admin_password }
+  db_encryption_key:      { file: ./secrets/db_encryption_key }
   rustfs_access_key: { file: ./secrets/rustfs_access_key }
   rustfs_secret_key: { file: ./secrets/rustfs_secret_key }
 

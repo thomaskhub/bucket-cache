@@ -1,0 +1,57 @@
+# Yocto end-to-end test (M2): builds a small recipe twice through the proxy
+# against RustFS. It's slower than the unit tests, so it runs on pushes to
+# main, weekly, and on demand.
+name: yocto-e2e
+
+on:
+  push:
+    branches: [main, "e2e/**"]
+    paths: ["cmd/**", "internal/**", "test/yocto/**", ".github/workflows/yocto-e2e.yml", "go.mod", "go.sum"]
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  scarthgap:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    services:
+      rustfs:
+        image: rustfs/rustfs:latest
+        ports: ["9000:9000"]
+        env:
+          RUSTFS_ACCESS_KEY: ci-access-key
+          RUSTFS_SECRET_KEY: ci-secret-key-123
+    env:
+      RUSTFS_ENDPOINT: http://127.0.0.1:9000
+      RUSTFS_ACCESS_KEY: ci-access-key
+      RUSTFS_SECRET_KEY: ci-secret-key-123
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: CGO_ENABLED=0 go build -o yproxy ./cmd/yproxy
+      - name: Install Yocto host packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gawk wget git diffstat unzip texinfo gcc build-essential chrpath \
+            socat cpio python3 python3-pip python3-pexpect xz-utils debianutils iputils-ping python3-git \
+            python3-jinja2 python3-subunit zstd liblz4-tool file locales libacl1 jq
+          sudo locale-gen en_US.UTF-8
+          # BitBake uses unprivileged user namespaces, which Ubuntu 24.04 restricts.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: End-to-end test
+        env:
+          LANG: en_US.UTF-8
+        run: test/yocto/e2e.sh
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yocto-e2e-logs
+          path: |
+            .yocto-e2e/*.log
+            .yocto-e2e/*.sigs
+          if-no-files-found: ignore
+          include-hidden-files: true

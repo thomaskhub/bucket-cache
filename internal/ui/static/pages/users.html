@@ -1,0 +1,60 @@
+<h1 class="h1">Users</h1>
+
+<section class="card mb-6" x-show="secret" id="user-secret">
+  <h2 class="h2">One-time password</h2>
+  <p class="alert alert-warning">Give this password to <strong x-text="secret ? secret.username : ''"></strong> over a safe channel.
+    It is shown only once. At the next login they must set up TOTP and choose their own password.</p>
+  <div class="copy-row">
+    <code class="code flex-1 break-all" id="user-password" x-text="secret ? secret.password : ''"></code>
+    <button type="button" class="btn btn-secondary btn-sm" x-data="copyButton" :data-copy="secret ? secret.password : ''" @click="copy()" x-text="label"></button>
+  </div>
+  <button type="button" class="btn btn-primary btn-sm mt-3" @click="dismiss()">Done</button>
+</section>
+
+<section class="card mb-6">
+  <h2 class="h2">New user</h2>
+  <form @submit.prevent="create()" class="flex flex-wrap items-end gap-4" id="user-form">
+    <label class="field"><span>Username</span><input class="input" name="username" required x-model="username" autocomplete="off"></label>
+    <label class="field"><span>Role</span>
+      <select class="input" name="role" x-model="role">
+        <option value="user">user (own tokens, view buckets)</option>
+        <option value="admin">admin (everything)</option>
+      </select></label>
+    <button class="btn btn-primary" type="submit" :disabled="busy">Create user</button>
+  </form>
+  <p x-show="formError" class="alert alert-error mt-3" x-text="formError" role="alert"></p>
+</section>
+
+<section class="card">
+  <h2 class="h2">All users</h2>
+  <p x-show="error" class="alert alert-error" x-text="error"></p>
+  <div class="overflow-x-auto">
+    <table class="table" id="users-table">
+      <thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Last login</th><th>Actions</th></tr></thead>
+      <tbody>
+        <template x-for="u in users" :key="u.id">
+          <tr :data-user="u.username">
+            <td class="font-medium" x-text="u.username"></td>
+            <td><span class="badge" x-text="u.role"></span></td>
+            <td><span :class="statusClass(u)" x-text="status(u)"></span></td>
+            <td x-text="fmt(u.last_login_at)"></td>
+            <td>
+              <template x-if="!isSelf(u)">
+                <span class="flex flex-wrap gap-1">
+                  <button type="button" class="btn btn-secondary btn-sm" @click="toggleDisabled(u)" x-text="disableLabel(u)"></button>
+                  <button type="button" class="btn btn-secondary btn-sm" @click="toggleRole(u)" x-text="roleLabel(u)"></button>
+                  <button type="button" class="btn btn-secondary btn-sm" x-show="u.locked" @click="unlock(u)">Unlock</button>
+                  <button type="button" class="btn btn-secondary btn-sm" @click="resetTOTP(u)" x-text="confirmLabel(u, 'totp', 'Reset TOTP')"></button>
+                  <button type="button" class="btn btn-secondary btn-sm" @click="resetPassword(u)" x-text="confirmLabel(u, 'password', 'Reset password')"></button>
+                  <button type="button" class="btn btn-danger btn-sm" @click="remove(u)" x-text="confirmLabel(u, 'delete', 'Delete')"></button>
+                </span>
+              </template>
+              <span x-show="isSelf(u)" class="text-xs text-slate-500">you</span>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+  <p class="mt-3 text-xs text-slate-500">Disabling or deleting a user revokes the tokens they created.</p>
+</section>

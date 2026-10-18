@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -71,6 +72,7 @@ func (c *Config) applyDefaults() {
 	def(&c.Auth.TokenMaxTTL, 72*time.Hour)
 	def(&c.Auth.PersonalTokenMaxTTL, 90*24*time.Hour)
 	def(&c.Auth.ValidationCacheTTL, 5*time.Second)
+	def(&c.Auth.SessionIdleTimeout, 8*time.Hour)
 	str(&c.Storage.DBPath, "/data/proxy.db")
 	str(&c.Storage.CacheRoot, "/cache")
 	str(&c.Log.Level, "info")
@@ -90,7 +92,10 @@ func (c *Config) applyDefaults() {
 			str(&b.Region, "us-east-1")
 		}
 		str(&b.Cache.Freshness, "immutable")
-		def(&b.Cache.NegativeTTL, 30*time.Second)
+		if b.Cache.NegativeTTL == nil {
+			d := Duration(30 * time.Second)
+			b.Cache.NegativeTTL = &d
+		}
 		def(&b.Timeouts.Connect, 5*time.Second)
 		def(&b.Timeouts.FirstByte, 30*time.Second)
 		def(&b.Timeouts.Idle, 90*time.Second)
@@ -99,10 +104,13 @@ func (c *Config) applyDefaults() {
 	if c.Git != nil {
 		str(&c.Git.Storage, "/git")
 		def(&c.Git.EvictAfter, 90*24*time.Hour)
+		def(&c.Git.FetchTimeout, 30*time.Minute)
+		def(&c.Git.MaintenanceInterval, time.Hour)
 		for i := range c.Git.Remotes {
 			r := &c.Git.Remotes[i]
 			def(&r.RefreshInterval, 10*time.Minute)
 			def(&r.LsRemoteCache, 3*time.Second)
+			def(&r.UpstreamTimeout, 3*time.Second)
 			if r.Prune == nil {
 				t := true
 				r.Prune = &t
@@ -183,6 +191,12 @@ func (c *Config) Validate() error {
 	if c.Auth.InitialAdminUser.Configured() != c.Auth.InitialAdminPassword.Configured() {
 		add("auth: set both initial_admin_user and initial_admin_password, or neither")
 	}
+	if c.Auth.InitialAdminUser.Configured() && !c.Auth.DBEncryptionKey.Configured() {
+		add("auth: db_encryption_key is required for web UI users (it encrypts their TOTP secrets)")
+	}
+	if c.Auth.UserTokenScope != nil {
+		c.validateUserTokenScope(add)
+	}
 	switch c.Log.Level {
 	case "debug", "info", "warn", "error":
 	default:
@@ -247,6 +261,9 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Git != nil {
+		if c.Git.MaxConcurrency < 0 {
+			add("git.max_concurrency must not be negative")
+		}
 		names := map[string]bool{}
 		for i, r := range c.Git.Remotes {
 			where := fmt.Sprintf("git.remotes[%d]", i)
@@ -273,9 +290,31 @@ func (c *Config) Validate() error {
 			if (r.Credentials.AppID == "") != !r.Credentials.AppPrivateKey.Configured() {
 				add("%s: credentials: a GitHub App needs both app_id and app_private_key", where)
 			}
+			if r.Credentials.APIURL != "" {
+				if u, err := url.Parse(r.Credentials.APIURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+					add("%s: credentials.api_url %q must be an http(s) URL", where, r.Credentials.APIURL)
+				}
+			}
+			for _, s := range r.Seed {
+				if strings.Count(s, "/") != 1 || strings.Contains(s, "*") || !r.Allows(s) {
+					add("%s: seed %q must be an owner/repo name covered by allow", where, s)
+				}
+			}
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// Allows reports whether the remote's allowlist covers ownerRepo, compared
+// case-insensitively (FR-80). Patterns are "owner/repo" or "owner/*".
+func (r *GitRemote) Allows(ownerRepo string) bool {
+	ownerRepo = strings.ToLower(ownerRepo)
+	for _, p := range r.Allow {
+		if ok, _ := path.Match(strings.ToLower(p), ownerRepo); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Config) resolveSecrets() error {
@@ -301,6 +340,34 @@ func (c *Config) resolveSecrets() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (c *Config) validateUserTokenScope(add func(string, ...any)) {
+	buckets := map[string]bool{"*": true}
+	for _, b := range c.Buckets {
+		buckets[b.Alias] = true
+	}
+	remotes := map[string]bool{"*": true}
+	if c.Git != nil {
+		for _, r := range c.Git.Remotes {
+			remotes[r.Name] = true
+		}
+	}
+	for _, b := range c.Auth.UserTokenScope.Buckets {
+		if !buckets[b] {
+			add("auth.user_token_scope: unknown bucket %q", b)
+		}
+	}
+	for _, g := range c.Auth.UserTokenScope.Git {
+		if !remotes[g.Remote] {
+			add("auth.user_token_scope: unknown git remote %q", g.Remote)
+		}
+		for _, p := range g.Repos {
+			if strings.Count(p, "/") != 1 {
+				add("auth.user_token_scope: repo pattern %q must be owner/repo, owner/* or */*", p)
+			}
+		}
+	}
 }
 
 // CacheEnabled reports whether any bucket uses the disk cache.

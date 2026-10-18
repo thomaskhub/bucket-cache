@@ -34,6 +34,9 @@ wait_for() { # url, name
 make_secrets() {
   mkdir -p secrets
   [ -s secrets/admin_api_key ] || openssl rand -hex 32 > secrets/admin_api_key
+  [ -s secrets/db_encryption_key ] || openssl rand -hex 32 > secrets/db_encryption_key
+  [ -s secrets/initial_admin_user ] || printf admin > secrets/initial_admin_user
+  [ -s secrets/initial_admin_password ] || openssl rand -hex 12 > secrets/initial_admin_password
   printf debug-access-key > secrets/rustfs_access_key
   printf debug-secret-key > secrets/rustfs_secret_key
   chmod 644 secrets/*   # the proxy runs as uid 10001 and must read them
@@ -48,8 +51,14 @@ s3() { # method, path, [curl args...]
 
 seed_bucket() {
   wait_for "http://127.0.0.1:$RUSTFS_PORT/health" RustFS || true
-  s3 PUT "$BUCKET" -o /dev/null 2>/dev/null || true   # already exists is fine
-  echo "hello from the debug bucket" | s3 PUT "$BUCKET/hello.txt" --data-binary @- -o /dev/null
+  # RustFS can answer /health shortly before it accepts writes, so retry.
+  for _ in $(seq 30); do
+    s3 PUT "$BUCKET" -o /dev/null 2>/dev/null || true   # already exists is fine
+    echo "hello from the debug bucket" | s3 PUT "$BUCKET/hello.txt" --data-binary @- -o /dev/null 2>/dev/null && return 0
+    sleep 1
+  done
+  echo "could not create the test bucket in RustFS; see: $0 logs" >&2
+  exit 1
 }
 
 new_token() {
@@ -66,6 +75,10 @@ print_usage() {
 Debug instance is running.
   data:   http://localhost:$DATA_PORT
   admin:  http://localhost:$ADMIN_PORT  (key in deploy/debug/secrets/admin_api_key)
+  web UI: http://localhost:$ADMIN_PORT/
+          user $(cat secrets/initial_admin_user), initial password $(cat secrets/initial_admin_password)
+          (first login: leave the code empty, set up TOTP, then choose a new password;
+          the initial password stops working once changed)
   rustfs: http://localhost:$RUSTFS_PORT  (debug-access-key / debug-secret-key)
 
 Token (12h): $t

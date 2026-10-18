@@ -12,9 +12,11 @@ import (
 	"time"
 
 	"github.com/thomaskhub/bucket-cache/internal/auth"
+	"github.com/thomaskhub/bucket-cache/internal/cache"
 	"github.com/thomaskhub/bucket-cache/internal/config"
 	"github.com/thomaskhub/bucket-cache/internal/s3proxy"
 	"github.com/thomaskhub/bucket-cache/internal/store"
+	"github.com/thomaskhub/bucket-cache/internal/users"
 )
 
 // API serves the management endpoints.
@@ -23,13 +25,21 @@ type API struct {
 	store    *store.Store
 	auth     *auth.Authenticator
 	backends map[string]s3proxy.Backend
+	caches   map[string]*cache.Store
 	log      *slog.Logger
 	now      func() time.Time
+	users    *users.Service // nil: no UI sessions (see WithUsers)
 }
 
 // New returns the API.
 func New(cfg *config.Config, st *store.Store, a *auth.Authenticator, backends map[string]s3proxy.Backend, log *slog.Logger) *API {
 	return &API{cfg: cfg, store: st, auth: a, backends: backends, log: log, now: time.Now}
+}
+
+// WithCaches gives the API the disk caches for stats and purging (FR-57).
+func (a *API) WithCaches(c map[string]*cache.Store) *API {
+	a.caches = c
+	return a
 }
 
 // Register mounts the endpoints on mux.
@@ -41,8 +51,23 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/apikeys", a.withAdmin(a.listAPIKeys))
 	mux.HandleFunc("POST /api/v1/apikeys", a.withAdmin(a.createAPIKey))
 	mux.HandleFunc("DELETE /api/v1/apikeys/{id}", a.withAdmin(a.revokeAPIKey))
-	mux.HandleFunc("GET /api/v1/buckets", a.withAdmin(a.listBuckets))
+	mux.HandleFunc("GET /api/v1/buckets", a.withViewer(a.listBuckets))
 	mux.HandleFunc("POST /api/v1/buckets/{alias}/test", a.withAdmin(a.testBucket))
+	mux.HandleFunc("GET /api/v1/buckets/{alias}/cache", a.withViewer(a.cacheStats)) // FR-60: users see cache stats
+	mux.HandleFunc("DELETE /api/v1/buckets/{alias}/cache", a.withAdmin(a.purgeCache))
+	a.registerSession(mux)
+	a.registerUsers(mux)
+}
+
+// Authenticated wraps a handler from another package (such as the git
+// mirror API) so it needs a valid API key of any role.
+func (a *API) Authenticated(h http.HandlerFunc) http.HandlerFunc {
+	return a.withKey(func(w http.ResponseWriter, r *http.Request, _ *auth.Principal) { h(w, r) })
+}
+
+// AdminOnly wraps a handler from another package so it needs the admin role.
+func (a *API) AdminOnly(h http.HandlerFunc) http.HandlerFunc {
+	return a.withAdmin(func(w http.ResponseWriter, r *http.Request, _ *auth.Principal) { h(w, r) })
 }
 
 type handlerWithPrincipal func(http.ResponseWriter, *http.Request, *auth.Principal)
@@ -54,6 +79,10 @@ func bearer(r *http.Request) string {
 
 func (a *API) withKey(next handlerWithPrincipal) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if bearer(r) == "" && a.hasSessionCookie(r) {
+			a.withSession(w, r, next) // a logged-in UI user (FR-62)
+			return
+		}
 		p, err := a.auth.APIKey(r.Context(), bearer(r))
 		if err != nil {
 			if !errors.Is(err, auth.ErrUnknown) && !errors.Is(err, auth.ErrDead) {
@@ -105,6 +134,7 @@ type createTokenReq struct {
 	Prefixes    []string          `json:"prefixes"`
 	Git         []store.GitScope  `json:"git"`
 	TTL         string            `json:"ttl"`
+	Kind        string            `json:"kind"` // ci (default) | personal (UI users only, FR-91)
 	Description string            `json:"description"`
 	Labels      map[string]string `json:"labels"`
 }
@@ -160,7 +190,20 @@ func (a *API) createToken(w http.ResponseWriter, r *http.Request, p *auth.Princi
 	if !decode(w, r, &req) {
 		return
 	}
-	ttl := a.cfg.Auth.TokenDefaultTTL.D()
+	kind, ttl, maxTTL := "ci", a.cfg.Auth.TokenDefaultTTL.D(), a.cfg.Auth.TokenMaxTTL.D()
+	switch req.Kind {
+	case "", "ci":
+	case "personal":
+		if p.UserID == "" {
+			writeErr(w, http.StatusForbidden, "personal tokens can only be created by UI users")
+			return
+		}
+		kind, maxTTL = "personal", a.cfg.Auth.PersonalTokenMaxTTL.D()
+		ttl = min(30*24*time.Hour, maxTTL)
+	default:
+		writeErr(w, http.StatusBadRequest, "kind must be ci or personal")
+		return
+	}
 	if req.TTL != "" {
 		d, err := config.ParseDuration(req.TTL)
 		if err != nil || d <= 0 {
@@ -169,8 +212,8 @@ func (a *API) createToken(w http.ResponseWriter, r *http.Request, p *auth.Princi
 		}
 		ttl = d
 	}
-	if ttl > a.cfg.Auth.TokenMaxTTL.D() {
-		writeErr(w, http.StatusBadRequest, "ttl exceeds the maximum of "+a.cfg.Auth.TokenMaxTTL.D().String())
+	if ttl > maxTTL {
+		writeErr(w, http.StatusBadRequest, "ttl exceeds the maximum of "+maxTTL.String())
 		return
 	}
 	scope := store.Scope{Buckets: req.Buckets, Prefixes: req.Prefixes, Git: req.Git}
@@ -185,7 +228,7 @@ func (a *API) createToken(w http.ResponseWriter, r *http.Request, p *auth.Princi
 	value := auth.NewSecret(auth.TokenPrefix)
 	now := a.now().UTC().Truncate(time.Second)
 	tok := &store.Token{
-		ID: auth.NewID("tok_"), Hash: auth.Hash(value), Kind: "ci", Description: req.Description,
+		ID: auth.NewID("tok_"), Hash: auth.Hash(value), Kind: kind, Description: req.Description,
 		Labels: req.Labels, Scope: scope, CreatedBy: p.KeyID, CreatedAt: now, ExpiresAt: now.Add(ttl),
 	}
 	if tok.Labels == nil {
@@ -209,6 +252,16 @@ func (a *API) examples(value string, s store.Scope) map[string]string {
 	out := map[string]string{"env": "export SSTATE_PROXY_TOKEN=" + value}
 	if len(s.Buckets) > 0 && s.Buckets[0] != "*" {
 		out["sstate_mirrors"] = `SSTATE_MIRRORS ?= "file://.* ` + base + `/t/${SSTATE_PROXY_TOKEN}/` + s.Buckets[0] + `/PATH;downloadfilename=PATH"`
+	}
+	if len(s.Git) > 0 && a.cfg.Git != nil {
+		for _, r := range a.cfg.Git.Remotes {
+			if r.Name == s.Git[0].Remote {
+				// Basic auth with the token as password (FR-81), as in requirements 10.3.
+				scheme, host, _ := strings.Cut(base, "://")
+				out["git_insteadof"] = `git config --global url."` + scheme + `://ci:${SSTATE_PROXY_TOKEN}@` + host + `/git/` + r.Name +
+					`/".insteadOf "` + strings.TrimRight(r.URL, "/") + `/"`
+			}
+		}
 	}
 	return out
 }
@@ -399,4 +452,42 @@ func (a *API) testBucket(w http.ResponseWriter, r *http.Request, _ *auth.Princip
 		}
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// bucketCache finds the cache of the bucket in the path, or writes an error.
+func (a *API) bucketCache(w http.ResponseWriter, r *http.Request) *cache.Store {
+	alias := r.PathValue("alias")
+	if _, ok := a.backends[alias]; !ok {
+		writeErr(w, http.StatusNotFound, "bucket not found")
+		return nil
+	}
+	c := a.caches[alias]
+	if c == nil {
+		writeErr(w, http.StatusConflict, "bucket is not in cache mode")
+		return nil
+	}
+	return c
+}
+
+func (a *API) cacheStats(w http.ResponseWriter, r *http.Request, _ *auth.Principal) {
+	if c := a.bucketCache(w, r); c != nil {
+		writeJSON(w, http.StatusOK, c.Stats())
+	}
+}
+
+// purgeCache removes the whole cache of a bucket, one key (?key=) or every
+// key under a prefix (?prefix=) (FR-57).
+func (a *API) purgeCache(w http.ResponseWriter, r *http.Request, p *auth.Principal) {
+	c := a.bucketCache(w, r)
+	if c == nil {
+		return
+	}
+	key, prefix := r.URL.Query().Get("key"), r.URL.Query().Get("prefix")
+	if key != "" && prefix != "" {
+		writeErr(w, http.StatusBadRequest, "use either key or prefix, not both")
+		return
+	}
+	n, bytes := c.Purge(key, prefix)
+	a.log.Info("cache purge", "bucket", c.Alias(), "key", key, "prefix", prefix, "objects", n, "by", p.KeyID)
+	writeJSON(w, http.StatusOK, map[string]any{"alias": c.Alias(), "removed": n, "bytes_freed": bytes})
 }

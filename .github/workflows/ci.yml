@@ -28,6 +28,12 @@ jobs:
           go-version-file: go.mod
       - run: go vet ./...
       - run: go test -race ./...
+        env:
+          YPROXY_BROWSER_TEST: require # the UI browser test uses the runner's Chrome
+      - name: HEAD load test (NFR-PERF)
+        run: go test -count=1 -run TestLoadHEAD -v ./internal/s3proxy/
+        env:
+          YPROXY_LOAD_TEST: "1"
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.14
@@ -35,6 +41,14 @@ jobs:
         run: |
           go install github.com/google/go-licenses/v2@latest
           go-licenses check ./... --ignore github.com/thomaskhub/bucket-cache --allowed_licenses=MIT,BSD-2-Clause,BSD-3-Clause,ISC,Apache-2.0,0BSD,Unlicense
+      - name: Vulnerability scan of Go dependencies (SEC-23)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+      - name: Check monitoring files (FR-75)
+        run: |
+          jq empty deploy/monitoring/grafana-dashboard.json
+          docker run --rm -v "$PWD/deploy/monitoring:/m:ro" --entrypoint promtool prom/prometheus:latest check rules /m/yproxy-alerts.yml
       - name: SBOM for the Go binary (SEC-23)
         run: |
           go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
@@ -82,3 +96,11 @@ jobs:
           format: spdx-json
           output-file: yproxy-image.spdx.json
           artifact-name: sbom-image.spdx.json
+      - name: Image vulnerability scan (acceptance 8)
+        uses: anchore/scan-action@v6
+        with:
+          image: yproxy:ci
+          fail-build: true
+          severity-cutoff: critical
+          only-fixed: true
+          output-format: table

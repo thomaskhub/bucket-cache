@@ -1,0 +1,43 @@
+<h1 class="h1">Dashboard</h1>
+<p x-show="error" class="alert alert-error" x-text="error"></p>
+<div class="grid grid-cols-2 gap-4 md:grid-cols-5 mb-6">
+  <div class="stat"><span class="stat-label">Active tokens</span><span class="stat-value" id="stat-tokens" x-text="tokens.length"></span></div>
+  <div class="stat"><span class="stat-label">CI tokens</span><span class="stat-value" x-text="count('ci')"></span></div>
+  <div class="stat"><span class="stat-label">Personal tokens</span><span class="stat-value" x-text="count('personal')"></span></div>
+  <div class="stat"><span class="stat-label">Buckets</span><span class="stat-value" x-text="buckets"></span></div>
+  <div class="stat" x-show="hasUsers()"><span class="stat-label">Users / API keys</span>
+    <span class="stat-value"><span x-text="users"></span> / <span x-text="apikeys"></span></span></div>
+  <div class="stat" x-show="hasMirrors()"><span class="stat-label">Git mirrors</span>
+    <a class="stat-value" href="#/repos" id="stat-mirrors" x-text="mirrors"></a></div>
+  <template x-for="c in caches" :key="c.alias">
+    <div class="stat" :data-cache-ratio="c.alias"><span class="stat-label">Cache hit ratio · <span x-text="c.alias"></span></span>
+      <a class="stat-value" href="#/buckets" x-text="ratio(c)"></a>
+      <span class="text-xs text-slate-500"><span x-text="bytes(c.bytes_saved)"></span> saved</span></div>
+  </template>
+</div>
+
+<section class="card">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="h2">Newest active tokens</h2>
+    <a class="btn btn-secondary btn-sm" href="#/tokens">All tokens</a>
+  </div>
+  <p x-show="loading" class="text-slate-500 text-sm">Loading…</p>
+  <p x-show="!loading && tokens.length === 0" class="text-slate-500 text-sm">No active tokens.</p>
+  <div class="overflow-x-auto" x-show="tokens.length > 0">
+    <table class="table">
+      <thead><tr><th>ID</th><th>Kind</th><th>Description</th><th>Expires</th><th>Requests</th><th>Bytes</th></tr></thead>
+      <tbody>
+        <template x-for="t in recent()" :key="t.id">
+          <tr>
+            <td><code class="code" x-text="t.id"></code></td>
+            <td><span class="badge" x-text="t.kind"></span></td>
+            <td x-text="t.description"></td>
+            <td x-text="fmt(t.expires_at)"></td>
+            <td x-text="t.requests"></td>
+            <td x-text="bytes(t.bytes)"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</section>

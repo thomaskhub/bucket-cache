@@ -1,0 +1,62 @@
+<h1 class="h1">Repositories</h1>
+<p x-show="notice" class="alert alert-success" x-text="notice" id="repos-notice"></p>
+<p x-show="error" class="alert alert-error" x-text="error"></p>
+
+<section class="card mb-6">
+  <h2 class="h2">Mirrors</h2>
+  <p x-show="loading" class="text-slate-500 text-sm">Loading…</p>
+  <p x-show="!loading && repos.length === 0" class="text-slate-500 text-sm" id="repos-empty">No repositories are mirrored yet. A repo is mirrored on its first clone through the proxy.</p>
+  <div class="overflow-x-auto" x-show="repos.length > 0">
+    <table class="table" id="repos-table">
+      <thead><tr><th>Remote</th><th>Repository</th><th>Size</th><th>Last fetch</th><th>Last use</th><th>Status</th><th x-show="isAdmin()"></th></tr></thead>
+      <tbody>
+        <template x-for="m in repos" :key="key(m)">
+          <tr :data-repo="key(m)">
+            <td x-text="m.remote"></td>
+            <td><span class="font-medium" x-text="m.repo"></span>
+              <div class="text-xs text-slate-500 break-all" x-show="m.clone_url" x-text="m.clone_url"></div></td>
+            <td class="whitespace-nowrap" x-text="bytes(m.size_bytes)"></td>
+            <td x-text="fmt(m.last_fetch)"></td>
+            <td x-text="fmt(m.last_access)"></td>
+            <td><span :class="statusClass(m)" x-text="status(m)"></span>
+              <div class="text-xs text-red-700 break-all" x-show="m.last_error" x-text="errorText(m)"></div></td>
+            <td x-show="isAdmin()" class="whitespace-nowrap">
+              <button type="button" class="btn btn-secondary btn-sm" data-action="refresh" :disabled="isBusy(m)" @click="refresh(m)">Refresh</button>
+              <button type="button" class="btn btn-danger btn-sm" data-action="delete" :disabled="isBusy(m)" @click="remove(m)" x-text="deleteLabel(m)"></button>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card mb-6" x-show="isAdmin()">
+  <h2 class="h2">Mirror a repository now</h2>
+  <form @submit.prevent="add()" class="flex flex-wrap items-end gap-4" id="repo-form">
+    <label class="field"><span>Remote</span>
+      <select class="input" name="remote" x-model="addRemote">
+        <template x-for="rm in remotes" :key="rm.name"><option :value="rm.name" x-text="rm.name"></option></template>
+      </select></label>
+    <label class="field"><span>Repository</span><input class="input" name="repo" x-model="addRepo" placeholder="owner/repo" required></label>
+    <button class="btn btn-primary" type="submit" :disabled="adding()">Mirror</button>
+  </form>
+  <p x-show="addError" class="alert alert-error mt-3" x-text="addError" role="alert"></p>
+</section>
+
+<section class="card">
+  <h2 class="h2">Use the mirror</h2>
+  <p class="text-sm text-slate-600 mb-3">Create a personal token with a git scope on the Tokens page, set <code class="code">YPROXY_TOKEN</code> to it,
+    and add these rules to your git config. They also cover submodules and BitBake's git fetcher.</p>
+  <template x-for="rm in remotes" :key="rm.name">
+    <div class="mb-4">
+      <p class="text-sm font-medium mb-1"><span x-text="rm.name"></span> (<span x-text="rm.url"></span>), allowed:
+        <span class="font-normal" x-text="rm.allow.join(', ')"></span></p>
+      <div class="copy-row" x-show="gitConfig(rm)">
+        <pre class="code flex-1 whitespace-pre-wrap break-all" x-text="gitConfig(rm)"></pre>
+        <button type="button" class="btn btn-secondary btn-sm" x-data="copyButton" :data-copy="gitConfig(rm)" @click="copy()" x-text="label"></button>
+      </div>
+      <p class="text-xs text-slate-500" x-show="!gitConfig(rm)">Set server.public_base_url to show ready-made git config lines.</p>
+    </div>
+  </template>
+</section>

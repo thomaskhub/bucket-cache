@@ -191,6 +191,23 @@ type Auth struct {
 	TokenMaxTTL          Duration `yaml:"token_max_ttl"`
 	PersonalTokenMaxTTL  Duration `yaml:"personal_token_max_ttl"`
 	ValidationCacheTTL   Duration `yaml:"validation_cache_ttl"`
+	// SessionIdleTimeout ends web UI sessions after this much inactivity (FR-61).
+	SessionIdleTimeout Duration `yaml:"session_idle_timeout"`
+	// UserTokenScope is the ceiling for tokens that UI users with the
+	// "user" role create (FR-20). Unset: all buckets and all git remotes.
+	UserTokenScope *TokenScope `yaml:"user_token_scope"`
+}
+
+// TokenScope limits what tokens may be issued for.
+type TokenScope struct {
+	Buckets []string        `yaml:"buckets"`
+	Git     []TokenGitScope `yaml:"git"`
+}
+
+// TokenGitScope allows repos matching Repos ("owner/repo" or "owner/*") on Remote.
+type TokenGitScope struct {
+	Remote string   `yaml:"remote"`
+	Repos  []string `yaml:"repos"`
 }
 
 type Storage struct {
@@ -218,11 +235,12 @@ type Credentials struct {
 }
 
 type BucketCache struct {
-	MaxSize     ByteSize `yaml:"max_size"`
-	Freshness   string   `yaml:"freshness"`
-	MaxAge      Duration `yaml:"max_age"`
-	NegativeTTL Duration `yaml:"negative_ttl"`
-	ServeStale  bool     `yaml:"serve_stale"`
+	MaxSize   ByteSize `yaml:"max_size"`
+	Freshness string   `yaml:"freshness"`
+	MaxAge    Duration `yaml:"max_age"`
+	// NegativeTTL is a pointer so an explicit 0 (disable) differs from unset (FR-55).
+	NegativeTTL *Duration `yaml:"negative_ttl"`
+	ServeStale  bool      `yaml:"serve_stale"`
 }
 
 type Timeouts struct {
@@ -236,6 +254,13 @@ type Git struct {
 	MaxSize    ByteSize    `yaml:"max_size"`
 	EvictAfter Duration    `yaml:"evict_after"`
 	Remotes    []GitRemote `yaml:"remotes"`
+	// MaxConcurrency limits concurrent upload-pack processes (FR-93).
+	// 0 means 4 per CPU, at least 8.
+	MaxConcurrency int `yaml:"max_concurrency"`
+	// FetchTimeout bounds one upstream clone or fetch.
+	FetchTimeout Duration `yaml:"fetch_timeout"`
+	// MaintenanceInterval is how often git maintenance and eviction run (FR-89).
+	MaintenanceInterval Duration `yaml:"maintenance_interval"`
 }
 
 type GitRemote struct {
@@ -247,12 +272,20 @@ type GitRemote struct {
 	LsRemoteCache   Duration       `yaml:"ls_remote_cache"`
 	Prune           *bool          `yaml:"prune"`
 	IncludePullRefs bool           `yaml:"include_pull_refs"`
+	// UpstreamTimeout bounds the ls-remote freshness check; after it the
+	// stale mirror is served (FR-84, FR-87).
+	UpstreamTimeout Duration `yaml:"upstream_timeout"`
+	// Seed lists owner/repo names mirrored at start-up (FR-83).
+	Seed []string `yaml:"seed"`
 }
 
 type GitCredentials struct {
 	Token         Secret `yaml:"token"`
 	AppID         string `yaml:"app_id"`
 	AppPrivateKey Secret `yaml:"app_private_key"`
+	// APIURL is the GitHub API base for App auth. Default: https://api.github.com
+	// for github.com, otherwise <url>/api/v3 (GitHub Enterprise Server).
+	APIURL string `yaml:"api_url"`
 }
 
 type Metrics struct {

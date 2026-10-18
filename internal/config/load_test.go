@@ -69,11 +69,17 @@ func TestParseValidConfig(t *testing.T) {
 	if c.Buckets[1].Region != "auto" {
 		t.Errorf("r2 region default = %q, want auto", c.Buckets[1].Region)
 	}
+	if c.Buckets[0].Cache.NegativeTTL.D() != 30*time.Second || c.Buckets[1].Cache.NegativeTTL.D() != 0 {
+		t.Errorf("negative_ttl: default %s, explicit 0s became %s", c.Buckets[0].Cache.NegativeTTL.D(), c.Buckets[1].Cache.NegativeTTL.D())
+	}
 	if c.Buckets[1].Cache.MaxSize != 200<<30 {
 		t.Errorf("max_size = %d", c.Buckets[1].Cache.MaxSize)
 	}
 	if c.Git.Remotes[0].LsRemoteCache.D() != 3*time.Second || !*c.Git.Remotes[0].Prune {
 		t.Errorf("git defaults not applied: %+v", c.Git.Remotes[0])
+	}
+	if r := c.Git.Remotes[0]; r.UpstreamTimeout.D() != 3*time.Second || c.Git.FetchTimeout.D() != 30*time.Minute || c.Git.MaintenanceInterval.D() != time.Hour || !r.Allows("ACME/Repo") || r.Allows("other/x") {
+		t.Errorf("git defaults or allowlist wrong: %+v", r)
 	}
 	if c.Git.EvictAfter.D() != 90*24*time.Hour {
 		t.Errorf("evict_after default = %s", c.Git.EvictAfter.D())
@@ -134,6 +140,9 @@ git:
     - name: github
       url: https://user:pw@github.com
       allow: ["*"]
+      seed: ["other/repo"]
+      credentials: { api_url: "ftp://x" }
+  max_concurrency: -1
 `
 	_, err := Parse([]byte(yml), noEnv)
 	if err == nil {
@@ -151,6 +160,9 @@ git:
 		"cache.max_size is required",
 		"without credentials",
 		"allow pattern \"*\"",
+		"seed \"other/repo\"",
+		"credentials.api_url",
+		"max_concurrency",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("missing error %q in:\n%v", want, err)
