@@ -231,3 +231,19 @@ func TestGitHubApp(t *testing.T) {
 		}
 	}
 }
+
+func TestUpstreamStatus(t *testing.T) {
+	for _, c := range []struct {
+		stderr string
+		want   int
+	}{
+		{"remote: Repository not found.\nfatal: repository 'https://github.com/a/b.git/' not found", http.StatusNotFound},
+		{"fatal: could not read Username for 'https://github.com': terminal prompts disabled", http.StatusNotFound},
+		{"remote: Invalid username or token.\nfatal: Authentication failed for 'https://github.com/a/b.git/'", http.StatusBadGateway},
+		{"fatal: unable to access 'https://github.com/a/b.git/': Could not resolve host: github.com", http.StatusBadGateway},
+	} {
+		if got := upstreamStatus(&GitError{Stderr: c.stderr}); got != c.want {
+			t.Errorf("%q: got %d, want %d", c.stderr, got, c.want)
+		}
+	}
+}
