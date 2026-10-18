@@ -51,8 +51,14 @@ s3() { # method, path, [curl args...]
 
 seed_bucket() {
   wait_for "http://127.0.0.1:$RUSTFS_PORT/health" RustFS || true
-  s3 PUT "$BUCKET" -o /dev/null 2>/dev/null || true   # already exists is fine
-  echo "hello from the debug bucket" | s3 PUT "$BUCKET/hello.txt" --data-binary @- -o /dev/null
+  # RustFS can answer /health shortly before it accepts writes, so retry.
+  for _ in $(seq 30); do
+    s3 PUT "$BUCKET" -o /dev/null 2>/dev/null || true   # already exists is fine
+    echo "hello from the debug bucket" | s3 PUT "$BUCKET/hello.txt" --data-binary @- -o /dev/null 2>/dev/null && return 0
+    sleep 1
+  done
+  echo "could not create the test bucket in RustFS; see: $0 logs" >&2
+  exit 1
 }
 
 new_token() {
