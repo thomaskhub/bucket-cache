@@ -28,6 +28,10 @@ jobs:
           go-version-file: go.mod
       - run: go vet ./...
       - run: go test -race ./...
+      - name: HEAD load test (NFR-PERF)
+        run: go test -count=1 -run TestLoadHEAD -v ./internal/s3proxy/
+        env:
+          YPROXY_LOAD_TEST: "1"
         env:
           YPROXY_BROWSER_TEST: require # the UI browser test uses the runner's Chrome
       - uses: golangci/golangci-lint-action@v8
