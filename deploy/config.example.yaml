@@ -40,7 +40,7 @@ buckets:
     cache:
       max_size: 200GiB
       freshness: immutable
-      negative_ttl: 30s
+      negative_ttl: 30s          # 0s disables the 404 cache
       serve_stale: true
 
 git:

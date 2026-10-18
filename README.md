@@ -31,7 +31,40 @@ Stage M1 (S3 pass-through and tokens) is done:
 - Only unknown tokens are rate-limited; expired or revoked tokens get `401`
   and show up in `yproxy_auth_dead_token_requests_total`.
 
-Caching, the UI and the git mirror follow in stages M2–M6.
+Stage M3 (disk cache) is done; see "Disk cache" below. The UI and the git
+mirror follow in stages M4–M6, and the Yocto end-to-end test in M2.
+
+## Disk cache
+
+Buckets with `mode: cache` keep a local copy under `storage.cache_root/<alias>`
+(stage M3). A miss is streamed to the client while it is written to a temp
+file, and concurrent requests for the same key share one backend fetch. The
+file is fsynced and renamed into place only when it is complete, so a crash or
+a broken transfer never leaves a partial object that gets served; leftover
+temp files are removed at startup. If the client disconnects, the download
+still finishes in the background and is cached. File names are SHA-256 hashes
+of alias and key, never the key itself.
+
+- `HEAD`, `Range` and conditional requests on a hit are answered from local
+  metadata and never reach the backend. Responses carry `X-Cache: HIT`,
+  `MISS`, `STALE` or `BYPASS` (pass-through buckets and objects larger than
+  `max_size`).
+- `freshness: immutable` never revalidates; `revalidate` sends a conditional
+  `HEAD` once `max_age` has passed. With `serve_stale: true` cached objects
+  are still served (`STALE`) when that check fails.
+- 404s are cached for `negative_ttl` (default 30s, `0s` disables).
+- An LRU sweeper keeps usage between 85 % and 95 % of `max_size`.
+- Stats and purge (admin API key):
+
+```sh
+curl -H "Authorization: Bearer $ADMIN_KEY" http://cache.lan:8081/api/v1/buckets/sstate-cloud/cache
+curl -X DELETE -H "Authorization: Bearer $ADMIN_KEY" "http://cache.lan:8081/api/v1/buckets/sstate-cloud/cache?prefix=kirkstone/"
+# ?key=<key> purges one object; no parameter purges the whole bucket
+```
+
+Metrics: `yproxy_cache_requests_total{bucket,result}`, `yproxy_cache_hit_bytes_total`,
+`yproxy_cache_fill_bytes_total`, `yproxy_cache_fill_errors_total`,
+`yproxy_cache_evictions_total`, `yproxy_cache_size_bytes`, `yproxy_cache_objects`.
 
 ## Creating a token for a build
 

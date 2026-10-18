@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/thomaskhub/bucket-cache/internal/auth"
+	"github.com/thomaskhub/bucket-cache/internal/cache"
 	"github.com/thomaskhub/bucket-cache/internal/metrics"
 	"github.com/thomaskhub/bucket-cache/internal/store"
 )
@@ -23,6 +24,8 @@ import (
 // token in an Authorization header, /{bucket}/{key} (FR-1, FR-2).
 type Handler struct {
 	backends map[string]Backend
+	caches   map[string]*cache.Store // buckets in mode: cache
+	reval    coalescer[revalResult]
 	auth     *auth.Authenticator
 	limiter  *auth.IPLimiter
 	log      *slog.Logger
@@ -43,6 +46,7 @@ type Handler struct {
 func NewHandler(backends map[string]Backend, a *auth.Authenticator, log *slog.Logger, reg prometheus.Registerer, accessLog bool) *Handler {
 	h := &Handler{
 		backends: backends, auth: a, log: log, access: accessLog,
+		caches:   map[string]*cache.Store{},
 		limiter:  auth.NewIPLimiter(20, 200),
 		lastWarn: map[string]time.Time{},
 		requests: prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: metrics.Namespace, Subsystem: "s3",
@@ -142,13 +146,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	code, n := h.serveObject(w, r, backend, alias, key)
+	var code int
+	var n int64
+	xcache := cache.Bypass
+	if c := h.caches[alias]; c != nil {
+		code, n, xcache = h.serveCached(w, r, backend, c, alias, key)
+	} else {
+		code, n = h.serveObject(w, r, backend, alias, key)
+	}
 	h.requests.WithLabelValues(alias, r.Method, strconv.Itoa(code)).Inc()
 	h.bytes.WithLabelValues(alias).Add(float64(n))
 	h.auth.RecordUsage(tok.ID, n)
 	if h.access {
 		h.log.Info("request", "token_id", tok.ID, "method", r.Method, "bucket", alias, "key", key,
-			"status", code, "bytes", n, "duration_ms", time.Since(start).Milliseconds())
+			"status", code, "bytes", n, "cache", xcache, "duration_ms", time.Since(start).Milliseconds())
 	}
 }
 
@@ -237,6 +248,7 @@ var copyBufPool = sync.Pool{New: func() any { b := make([]byte, 256<<10); return
 // the status code sent and the number of body bytes written.
 func (h *Handler) serveObject(w http.ResponseWriter, r *http.Request, b Backend, alias, key string) (int, int64) {
 	start := time.Now()
+	w.Header().Set("X-Cache", cache.Bypass) // FR-74
 	c := conditions(r)
 	var obj *Object
 	var err error
