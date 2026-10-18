@@ -149,9 +149,9 @@ YP.page({
       }
       var lines = ['P="' + p + '"'];
       prefixes.forEach(function (o) {
-        lines.push('git config --global url."$P' + o + '".insteadOf "' + up + o + '"');
-        lines.push('git config --global --add url."$P' + o + '".insteadOf "git@' + host + ':' + o + '"');
-        lines.push('git config --global --add url."$P' + o + '".insteadOf "ssh://git@' + host + '/' + o + '"');
+        lines.push('git config --global url."${P}' + o + '".insteadOf "' + up + o + '"');
+        lines.push('git config --global --add url."${P}' + o + '".insteadOf "git@' + host + ':' + o + '"');
+        lines.push('git config --global --add url."${P}' + o + '".insteadOf "ssh://git@' + host + '/' + o + '"');
       });
       return lines.join('\n');
     },
