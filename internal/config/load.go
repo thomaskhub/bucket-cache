@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -99,10 +100,13 @@ func (c *Config) applyDefaults() {
 	if c.Git != nil {
 		str(&c.Git.Storage, "/git")
 		def(&c.Git.EvictAfter, 90*24*time.Hour)
+		def(&c.Git.FetchTimeout, 30*time.Minute)
+		def(&c.Git.MaintenanceInterval, time.Hour)
 		for i := range c.Git.Remotes {
 			r := &c.Git.Remotes[i]
 			def(&r.RefreshInterval, 10*time.Minute)
 			def(&r.LsRemoteCache, 3*time.Second)
+			def(&r.UpstreamTimeout, 3*time.Second)
 			if r.Prune == nil {
 				t := true
 				r.Prune = &t
@@ -247,6 +251,9 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Git != nil {
+		if c.Git.MaxConcurrency < 0 {
+			add("git.max_concurrency must not be negative")
+		}
 		names := map[string]bool{}
 		for i, r := range c.Git.Remotes {
 			where := fmt.Sprintf("git.remotes[%d]", i)
@@ -273,9 +280,31 @@ func (c *Config) Validate() error {
 			if (r.Credentials.AppID == "") != !r.Credentials.AppPrivateKey.Configured() {
 				add("%s: credentials: a GitHub App needs both app_id and app_private_key", where)
 			}
+			if r.Credentials.APIURL != "" {
+				if u, err := url.Parse(r.Credentials.APIURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+					add("%s: credentials.api_url %q must be an http(s) URL", where, r.Credentials.APIURL)
+				}
+			}
+			for _, s := range r.Seed {
+				if strings.Count(s, "/") != 1 || strings.Contains(s, "*") || !r.Allows(s) {
+					add("%s: seed %q must be an owner/repo name covered by allow", where, s)
+				}
+			}
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// Allows reports whether the remote's allowlist covers ownerRepo, compared
+// case-insensitively (FR-80). Patterns are "owner/repo" or "owner/*".
+func (r *GitRemote) Allows(ownerRepo string) bool {
+	ownerRepo = strings.ToLower(ownerRepo)
+	for _, p := range r.Allow {
+		if ok, _ := path.Match(strings.ToLower(p), ownerRepo); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Config) resolveSecrets() error {

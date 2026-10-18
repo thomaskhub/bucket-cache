@@ -45,6 +45,17 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/buckets/{alias}/test", a.withAdmin(a.testBucket))
 }
 
+// Authenticated wraps a handler from another package (such as the git
+// mirror API) so it needs a valid API key of any role.
+func (a *API) Authenticated(h http.HandlerFunc) http.HandlerFunc {
+	return a.withKey(func(w http.ResponseWriter, r *http.Request, _ *auth.Principal) { h(w, r) })
+}
+
+// AdminOnly wraps a handler from another package so it needs the admin role.
+func (a *API) AdminOnly(h http.HandlerFunc) http.HandlerFunc {
+	return a.withAdmin(func(w http.ResponseWriter, r *http.Request, _ *auth.Principal) { h(w, r) })
+}
+
 type handlerWithPrincipal func(http.ResponseWriter, *http.Request, *auth.Principal)
 
 func bearer(r *http.Request) string {
@@ -209,6 +220,16 @@ func (a *API) examples(value string, s store.Scope) map[string]string {
 	out := map[string]string{"env": "export SSTATE_PROXY_TOKEN=" + value}
 	if len(s.Buckets) > 0 && s.Buckets[0] != "*" {
 		out["sstate_mirrors"] = `SSTATE_MIRRORS ?= "file://.* ` + base + `/t/${SSTATE_PROXY_TOKEN}/` + s.Buckets[0] + `/PATH;downloadfilename=PATH"`
+	}
+	if len(s.Git) > 0 && a.cfg.Git != nil {
+		for _, r := range a.cfg.Git.Remotes {
+			if r.Name == s.Git[0].Remote {
+				// Basic auth with the token as password (FR-81), as in requirements 10.3.
+				scheme, host, _ := strings.Cut(base, "://")
+				out["git_insteadof"] = `git config --global url."` + scheme + `://ci:${SSTATE_PROXY_TOKEN}@` + host + `/git/` + r.Name +
+					`/".insteadOf "` + strings.TrimRight(r.URL, "/") + `/"`
+			}
+		}
 	}
 	return out
 }
