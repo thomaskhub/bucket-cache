@@ -191,6 +191,23 @@ type Auth struct {
 	TokenMaxTTL          Duration `yaml:"token_max_ttl"`
 	PersonalTokenMaxTTL  Duration `yaml:"personal_token_max_ttl"`
 	ValidationCacheTTL   Duration `yaml:"validation_cache_ttl"`
+	// SessionIdleTimeout ends web UI sessions after this much inactivity (FR-61).
+	SessionIdleTimeout Duration `yaml:"session_idle_timeout"`
+	// UserTokenScope is the ceiling for tokens that UI users with the
+	// "user" role create (FR-20). Unset: all buckets and all git remotes.
+	UserTokenScope *TokenScope `yaml:"user_token_scope"`
+}
+
+// TokenScope limits what tokens may be issued for.
+type TokenScope struct {
+	Buckets []string        `yaml:"buckets"`
+	Git     []TokenGitScope `yaml:"git"`
+}
+
+// TokenGitScope allows repos matching Repos ("owner/repo" or "owner/*") on Remote.
+type TokenGitScope struct {
+	Remote string   `yaml:"remote"`
+	Repos  []string `yaml:"repos"`
 }
 
 type Storage struct {

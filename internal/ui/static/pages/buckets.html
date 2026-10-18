@@ -1,0 +1,27 @@
+<h1 class="h1">Buckets</h1>
+<section class="card">
+  <p x-show="error" class="alert alert-error" x-text="error"></p>
+  <p x-show="!loading && buckets.length === 0" class="text-slate-500 text-sm">No buckets are configured.</p>
+  <div class="overflow-x-auto" x-show="buckets.length > 0">
+    <table class="table">
+      <thead><tr><th>Alias</th><th>Provider</th><th>Endpoint</th><th>Bucket</th><th>Prefix</th><th>Mode</th><th>Connection</th></tr></thead>
+      <tbody>
+        <template x-for="b in buckets" :key="b.alias">
+          <tr>
+            <td class="font-medium" x-text="b.alias"></td>
+            <td x-text="b.provider"></td>
+            <td class="text-xs" x-text="b.endpoint"></td>
+            <td x-text="b.bucket"></td>
+            <td x-text="b.prefix"></td>
+            <td><span class="badge" x-text="b.mode"></span></td>
+            <td class="whitespace-nowrap">
+              <button type="button" class="btn btn-secondary btn-sm" x-show="canTest()" :disabled="isTesting(b)" @click="test(b)">Test</button>
+              <span x-show="hasResult(b)" :class="resultClass(b)" x-text="resultText(b)"></span>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+  <p class="mt-3 text-xs text-slate-500">Credentials are never shown. Edit buckets in the config file.</p>
+</section>

@@ -14,6 +14,12 @@ auth:
   db_encryption_key:      { file: /run/secrets/db_encryption_key }       # encrypts TOTP secrets
   token_default_ttl: 12h
   token_max_ttl: 72h
+  personal_token_max_ttl: 90d   # personal tokens UI users create for themselves
+  session_idle_timeout: 8h      # web UI sessions
+  # What UI users with the "user" role may issue tokens for (default: everything).
+  # user_token_scope:
+  #   buckets: [sstate]
+  #   git: [{ remote: github, repos: ["acme/*"] }]
 
 storage:
   db_path: /data/proxy.db

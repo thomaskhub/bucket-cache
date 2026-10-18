@@ -31,9 +31,8 @@ Stage M1 (S3 pass-through and tokens) is done:
 - Only unknown tokens are rate-limited; expired or revoked tokens get `401`
   and show up in `yproxy_auth_dead_token_requests_total`.
 
-Stage M5 (git mirror cache) is done: see [Git mirror](#git-mirror).
-
-Caching and the UI follow in the remaining stages.
+Also done: the git mirror cache (see [Git mirror](#git-mirror)) and users
+with TOTP login and the web UI (see [Web UI and users](#web-ui-and-users)).
 
 ## Creating a token for a build
 
@@ -131,8 +130,69 @@ are under `yproxy_git_*`; `/readyz` lists stale mirrors under
 yproxy serve --config /etc/proxy/config.yaml
 yproxy config check --config config.yaml   # validates config and secret files
 yproxy healthcheck                         # used by the Docker HEALTHCHECK
+yproxy user create [--admin] NAME          # web UI user; prints a one-time password
+yproxy user reset-password NAME            # new one-time password, unlocks the account
+yproxy user reset-totp NAME                # lost phone: the user enrols TOTP again
+yproxy user list
 yproxy version
 ```
+
+`user create` and `user reset-password` take `--password-file PATH` or
+`--password-stdin` instead of generating a password. Passwords are never
+accepted as command-line arguments. In Docker: `docker exec -it yproxy yproxy user reset-totp admin`.
+
+## Web UI and users
+
+The UI is served on the admin listener at `/` (for example
+`http://cache.lan:8081/`). It has pages for the dashboard, tokens (CI and
+personal tokens, shown once with copy buttons), API keys, buckets (with a
+connection test) and users. All assets (Alpine.js, Tailwind CSS) are embedded,
+so it works without internet access, and it uses only the `/api/v1` endpoints.
+
+- **First start:** if there are no users, the admin is created from the
+  `auth.initial_admin_user` and `auth.initial_admin_password` secret files.
+  `auth.db_encryption_key` must be set; it encrypts the TOTP secrets
+  (AES-256-GCM). Without it, UI login is disabled.
+- **Login** needs the password and a 6-digit TOTP code (RFC 6238, any
+  authenticator app). Each code works once. At first login (and after an admin
+  reset) the user must scan a QR code to set up TOTP, then choose a new
+  password, before reaching any other page.
+- **Lockout:** 5 failed logins in a row lock the account for 15 minutes;
+  failures are also rate-limited per client IP. `yproxy user reset-password`
+  or the Users page unlocks it.
+- **Roles:** `admin` can do everything. `user` can create, list and revoke
+  their own tokens, including long-lived personal tokens (up to
+  `auth.personal_token_max_ttl`, default 90d), and view buckets. Optionally
+  limit what users may issue tokens for with `auth.user_token_scope`.
+  Disabling or deleting a user revokes the tokens they created.
+- **Sessions** are server-side (only a hash of the cookie is stored), expire
+  after `auth.session_idle_timeout` (default 8h) of inactivity and after 24h
+  at most. The cookie is `HttpOnly` and `SameSite=Strict`, and `Secure` when the
+  UI is reached over HTTPS (built-in TLS, or a reverse proxy that sets
+  `X-Forwarded-Proto: https`). State-changing requests also need the session's
+  CSRF token in `X-CSRF-Token`.
+- **Plain HTTP** works, but the UI shows a warning banner: passwords and
+  session cookies then cross the network unencrypted.
+- The UI sends a strict Content Security Policy (no inline or eval'd scripts;
+  Alpine's CSP build), `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`.
+
+The UI login endpoints are `POST /api/v1/session` (login), `GET` and `DELETE`
+`/api/v1/session`, `POST /api/v1/session/totp` and `/session/totp/confirm`
+(enrolment) and `POST /api/v1/session/password`. Admins manage users with
+`GET/POST /api/v1/users`, `PATCH/DELETE /api/v1/users/{id}` and
+`POST /api/v1/users/{id}/reset-password|reset-totp`.
+
+**Changing the UI:** pages live in `internal/ui/static/pages/<id>.html` with a
+script `internal/ui/static/js/pages/<id>.js` that calls `YP.page({id, title,
+role, order}, factory)`; both are picked up automatically, including the nav
+entry. The vendored files are fetched by `scripts/vendor-ui.sh` (pinned
+versions); run `scripts/vendor-ui.sh css` after using Tailwind classes that
+are not in `internal/ui/static/css/app.css` yet.
+
+The browser test (`internal/ui/browser_test.go`) drives headless Chrome or
+Chromium with chromedp. It finds the browser via `CHROME_PATH`,
+`PLAYWRIGHT_BROWSERS_PATH` or `$PATH` and skips if there is none (CI sets
+`YPROXY_BROWSER_TEST=require` so it can't be skipped silently).
 
 ## Quick start (Docker)
 
@@ -171,7 +231,8 @@ Change the ports with `DATA_PORT`, `ADMIN_PORT` and `RUSTFS_PORT`.
 
 The proxy is licensed under the Apache License 2.0 (see `LICENSE` and `NOTICE`). Every Go dependency must be MIT, BSD, ISC or
 Apache-2.0; CI enforces this with `go-licenses` (see
-`THIRD_PARTY_LICENSES.csv`). The image also contains the `git` program
+`THIRD_PARTY_LICENSES.csv`, which also lists the embedded UI assets; their
+license texts are in `internal/ui/static/vendor/`). The image also contains the `git` program
 (GPL-2.0), which runs as a separate process and is not linked into the proxy;
 its license is in `/usr/share/doc/git` inside the image.
 

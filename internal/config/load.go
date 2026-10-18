@@ -72,6 +72,7 @@ func (c *Config) applyDefaults() {
 	def(&c.Auth.TokenMaxTTL, 72*time.Hour)
 	def(&c.Auth.PersonalTokenMaxTTL, 90*24*time.Hour)
 	def(&c.Auth.ValidationCacheTTL, 5*time.Second)
+	def(&c.Auth.SessionIdleTimeout, 8*time.Hour)
 	str(&c.Storage.DBPath, "/data/proxy.db")
 	str(&c.Storage.CacheRoot, "/cache")
 	str(&c.Log.Level, "info")
@@ -186,6 +187,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Auth.InitialAdminUser.Configured() != c.Auth.InitialAdminPassword.Configured() {
 		add("auth: set both initial_admin_user and initial_admin_password, or neither")
+	}
+	if c.Auth.InitialAdminUser.Configured() && !c.Auth.DBEncryptionKey.Configured() {
+		add("auth: db_encryption_key is required for web UI users (it encrypts their TOTP secrets)")
+	}
+	if c.Auth.UserTokenScope != nil {
+		c.validateUserTokenScope(add)
 	}
 	switch c.Log.Level {
 	case "debug", "info", "warn", "error":
@@ -330,6 +337,34 @@ func (c *Config) resolveSecrets() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (c *Config) validateUserTokenScope(add func(string, ...any)) {
+	buckets := map[string]bool{"*": true}
+	for _, b := range c.Buckets {
+		buckets[b.Alias] = true
+	}
+	remotes := map[string]bool{"*": true}
+	if c.Git != nil {
+		for _, r := range c.Git.Remotes {
+			remotes[r.Name] = true
+		}
+	}
+	for _, b := range c.Auth.UserTokenScope.Buckets {
+		if !buckets[b] {
+			add("auth.user_token_scope: unknown bucket %q", b)
+		}
+	}
+	for _, g := range c.Auth.UserTokenScope.Git {
+		if !remotes[g.Remote] {
+			add("auth.user_token_scope: unknown git remote %q", g.Remote)
+		}
+		for _, p := range g.Repos {
+			if strings.Count(p, "/") != 1 {
+				add("auth.user_token_scope: repo pattern %q must be owner/repo, owner/* or */*", p)
+			}
+		}
+	}
 }
 
 // CacheEnabled reports whether any bucket uses the disk cache.

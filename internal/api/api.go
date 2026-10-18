@@ -15,6 +15,7 @@ import (
 	"github.com/thomaskhub/bucket-cache/internal/config"
 	"github.com/thomaskhub/bucket-cache/internal/s3proxy"
 	"github.com/thomaskhub/bucket-cache/internal/store"
+	"github.com/thomaskhub/bucket-cache/internal/users"
 )
 
 // API serves the management endpoints.
@@ -25,6 +26,7 @@ type API struct {
 	backends map[string]s3proxy.Backend
 	log      *slog.Logger
 	now      func() time.Time
+	users    *users.Service // nil: no UI sessions (see WithUsers)
 }
 
 // New returns the API.
@@ -41,8 +43,10 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/apikeys", a.withAdmin(a.listAPIKeys))
 	mux.HandleFunc("POST /api/v1/apikeys", a.withAdmin(a.createAPIKey))
 	mux.HandleFunc("DELETE /api/v1/apikeys/{id}", a.withAdmin(a.revokeAPIKey))
-	mux.HandleFunc("GET /api/v1/buckets", a.withAdmin(a.listBuckets))
+	mux.HandleFunc("GET /api/v1/buckets", a.withViewer(a.listBuckets))
 	mux.HandleFunc("POST /api/v1/buckets/{alias}/test", a.withAdmin(a.testBucket))
+	a.registerSession(mux)
+	a.registerUsers(mux)
 }
 
 // Authenticated wraps a handler from another package (such as the git
@@ -65,6 +69,10 @@ func bearer(r *http.Request) string {
 
 func (a *API) withKey(next handlerWithPrincipal) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if bearer(r) == "" && a.hasSessionCookie(r) {
+			a.withSession(w, r, next) // a logged-in UI user (FR-62)
+			return
+		}
 		p, err := a.auth.APIKey(r.Context(), bearer(r))
 		if err != nil {
 			if !errors.Is(err, auth.ErrUnknown) && !errors.Is(err, auth.ErrDead) {
@@ -116,6 +124,7 @@ type createTokenReq struct {
 	Prefixes    []string          `json:"prefixes"`
 	Git         []store.GitScope  `json:"git"`
 	TTL         string            `json:"ttl"`
+	Kind        string            `json:"kind"` // ci (default) | personal (UI users only, FR-91)
 	Description string            `json:"description"`
 	Labels      map[string]string `json:"labels"`
 }
@@ -171,7 +180,20 @@ func (a *API) createToken(w http.ResponseWriter, r *http.Request, p *auth.Princi
 	if !decode(w, r, &req) {
 		return
 	}
-	ttl := a.cfg.Auth.TokenDefaultTTL.D()
+	kind, ttl, maxTTL := "ci", a.cfg.Auth.TokenDefaultTTL.D(), a.cfg.Auth.TokenMaxTTL.D()
+	switch req.Kind {
+	case "", "ci":
+	case "personal":
+		if p.UserID == "" {
+			writeErr(w, http.StatusForbidden, "personal tokens can only be created by UI users")
+			return
+		}
+		kind, maxTTL = "personal", a.cfg.Auth.PersonalTokenMaxTTL.D()
+		ttl = min(30*24*time.Hour, maxTTL)
+	default:
+		writeErr(w, http.StatusBadRequest, "kind must be ci or personal")
+		return
+	}
 	if req.TTL != "" {
 		d, err := config.ParseDuration(req.TTL)
 		if err != nil || d <= 0 {
@@ -180,8 +202,8 @@ func (a *API) createToken(w http.ResponseWriter, r *http.Request, p *auth.Princi
 		}
 		ttl = d
 	}
-	if ttl > a.cfg.Auth.TokenMaxTTL.D() {
-		writeErr(w, http.StatusBadRequest, "ttl exceeds the maximum of "+a.cfg.Auth.TokenMaxTTL.D().String())
+	if ttl > maxTTL {
+		writeErr(w, http.StatusBadRequest, "ttl exceeds the maximum of "+maxTTL.String())
 		return
 	}
 	scope := store.Scope{Buckets: req.Buckets, Prefixes: req.Prefixes, Git: req.Git}
@@ -196,7 +218,7 @@ func (a *API) createToken(w http.ResponseWriter, r *http.Request, p *auth.Princi
 	value := auth.NewSecret(auth.TokenPrefix)
 	now := a.now().UTC().Truncate(time.Second)
 	tok := &store.Token{
-		ID: auth.NewID("tok_"), Hash: auth.Hash(value), Kind: "ci", Description: req.Description,
+		ID: auth.NewID("tok_"), Hash: auth.Hash(value), Kind: kind, Description: req.Description,
 		Labels: req.Labels, Scope: scope, CreatedBy: p.KeyID, CreatedAt: now, ExpiresAt: now.Add(ttl),
 	}
 	if tok.Labels == nil {

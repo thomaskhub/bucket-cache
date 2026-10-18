@@ -1,0 +1,60 @@
+<h1 class="h1">API keys</h1>
+
+<section class="card mb-6" x-show="created" id="apikey-created">
+  <h2 class="h2">API key created</h2>
+  <p class="alert alert-warning">Copy the key now. It is shown only once.</p>
+  <div class="copy-row">
+    <code class="code flex-1 break-all" id="apikey-value" x-text="created ? created.key : ''"></code>
+    <button type="button" class="btn btn-secondary btn-sm" x-data="copyButton" :data-copy="created ? created.key : ''" @click="copy()" x-text="label"></button>
+  </div>
+  <button type="button" class="btn btn-primary btn-sm mt-3" @click="dismiss()">I have copied it</button>
+</section>
+
+<section class="card mb-6">
+  <h2 class="h2">New API key</h2>
+  <form @submit.prevent="create()" class="grid gap-4 md:grid-cols-2" id="apikey-form">
+    <label class="field"><span>Name</span><input class="input" name="name" required x-model="name" placeholder="e.g. gitlab-ci"></label>
+    <label class="field"><span>Role</span>
+      <select class="input" name="role" x-model="role">
+        <option value="token-issuer">token-issuer (create and revoke tokens within a ceiling)</option>
+        <option value="admin">admin (everything)</option>
+      </select></label>
+    <fieldset class="field" x-show="isIssuer()">
+      <legend class="mb-1 text-sm font-medium">May issue tokens for buckets</legend>
+      <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        <label class="flex items-center gap-2"><input type="checkbox" value="*" x-model="selBuckets"> all</label>
+        <template x-for="b in buckets" :key="b">
+          <label class="flex items-center gap-2"><input type="checkbox" :value="b" x-model="selBuckets"> <span x-text="b"></span></label>
+        </template>
+      </div>
+    </fieldset>
+    <label class="field" x-show="isIssuer()"><span>Maximum token lifetime</span>
+      <input class="input" name="max_ttl" x-model="maxTTL" placeholder="e.g. 24h (empty: the global maximum)"></label>
+    <p x-show="formError" class="alert alert-error md:col-span-2" x-text="formError" role="alert"></p>
+    <div class="md:col-span-2"><button class="btn btn-primary" type="submit" :disabled="busy">Create API key</button></div>
+  </form>
+</section>
+
+<section class="card">
+  <h2 class="h2">Active API keys</h2>
+  <p x-show="error" class="alert alert-error" x-text="error"></p>
+  <p x-show="!loading && keys.length === 0" class="text-slate-500 text-sm">No API keys. The bootstrap admin key from the secrets file is not listed.</p>
+  <div class="overflow-x-auto" x-show="keys.length > 0">
+    <table class="table">
+      <thead><tr><th>ID</th><th>Name</th><th>Role</th><th>Ceiling</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+      <tbody>
+        <template x-for="k in keys" :key="k.id">
+          <tr>
+            <td><code class="code" x-text="k.id"></code></td>
+            <td x-text="k.name"></td>
+            <td><span class="badge" x-text="k.role"></span></td>
+            <td class="text-xs" x-text="ceiling(k)"></td>
+            <td x-text="fmt(k.created_at)"></td>
+            <td x-text="fmt(k.last_used_at)"></td>
+            <td><button type="button" class="btn btn-danger btn-sm" @click="revoke(k)" x-text="revokeLabel(k)"></button></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</section>
