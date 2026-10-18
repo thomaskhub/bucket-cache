@@ -238,3 +238,14 @@ func TestExampleConfigIsValid(t *testing.T) {
 		t.Fatalf("deploy/config.example.yaml is invalid: %v", err)
 	}
 }
+
+func TestValidAllowPattern(t *testing.T) {
+	for p, want := range map[string]bool{
+		"Xilinx/*": true, "acme/app": true, "acme/meta-*": true, "my.org/repo_1": true,
+		"*": false, "*/*": false, "*/linux": false, "xilinx": false, "a/b/c": false, "/x": false, "x/": false, "a b/c": false,
+	} {
+		if got := ValidAllowPattern(p); got != want {
+			t.Errorf("ValidAllowPattern(%q) = %v, want %v", p, got, want)
+		}
+	}
+}

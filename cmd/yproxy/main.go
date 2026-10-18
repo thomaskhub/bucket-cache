@@ -148,7 +148,7 @@ func serve(cfgPath string, stderr io.Writer) int {
 	authn := auth.New(st, log, cfg.Auth.BootstrapAdminKey.Value(), cfg.Auth.ValidationCacheTTL.D())
 	var mirrors *gitmirror.Manager
 	if cfg.Git != nil {
-		mirrors, err = gitmirror.New(ctx, cfg.Git, gitmirror.Options{Logger: log, Registerer: reg, PublicBaseURL: cfg.Server.PublicBaseURL})
+		mirrors, err = gitmirror.New(ctx, cfg.Git, gitmirror.Options{Logger: log, Registerer: reg, PublicBaseURL: cfg.Server.PublicBaseURL, AllowStore: st})
 		if err != nil {
 			log.Error("starting the git mirror failed", "error", err.Error())
 			return 1
@@ -187,6 +187,7 @@ func serve(cfgPath string, stderr io.Writer) int {
 	webUI.Register(srv.Admin)
 	if mirrors != nil {
 		mirrors.RegisterAPI(srv.Admin, apiSrv.Authenticated, apiSrv.AdminOnly)
+		mirrors.RegisterAllowAPI(srv.Admin, apiSrv.AdminActor)
 	}
 
 	runErr := srv.Run(ctx)

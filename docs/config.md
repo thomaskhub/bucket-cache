@@ -91,7 +91,7 @@ Each entry of `remotes`:
 | `credentials.token` | | Secret. A token for private repos (GitHub: a fine-grained read-only token). |
 | `credentials.app_id`, `credentials.app_private_key` | | A GitHub App instead of a token; installation tokens are refreshed automatically. |
 | `credentials.api_url` | `https://api.github.com` | GitHub API for App tokens (GitHub Enterprise). |
-| `allow` | | Required. `owner/repo` or `owner/*` patterns that may be mirrored. Others get `404`. |
+| `allow` | | `owner/repo` or `owner/*` patterns that may be mirrored; the repo part may contain `*`, the owner can't. Others get `404`. Admins can add more patterns on the Repositories page or with `POST /api/v1/git/remotes/{remote}/allow`; those are stored in the database and apply at once. A remote with no patterns in either place mirrors nothing. |
 | `seed` | | Repos to mirror at start-up. |
 | `refresh_interval` | `10m` | Background check of every mirror. |
 | `ls_remote_cache` | `3s` | How long an upstream ref check is reused. A commit pushed upstream is visible to clients after at most this long. |

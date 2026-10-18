@@ -307,7 +307,7 @@ git:
 	}
 	authn := auth.New(st, log, adminKey, time.Second)
 	reg := prometheus.NewRegistry()
-	mgr, err := New(context.Background(), cfg.Git, Options{Logger: log, Registerer: reg, PublicBaseURL: cfg.Server.PublicBaseURL})
+	mgr, err := New(context.Background(), cfg.Git, Options{Logger: log, Registerer: reg, PublicBaseURL: cfg.Server.PublicBaseURL, AllowStore: st})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,6 +330,7 @@ git:
 	a := api.New(cfg, st, authn, nil, log)
 	a.Register(mux)
 	mgr.RegisterAPI(mux, a.Authenticated, a.AdminOnly)
+	mgr.RegisterAllowAPI(mux, a.AdminActor)
 	e.admin = httptest.NewServer(mux)
 	t.Cleanup(e.admin.Close)
 	return e
@@ -425,7 +426,12 @@ func (e *env) do(method, path string, hdr map[string]string, body io.Reader) (*h
 
 func (e *env) adminDo(method, path, key string) (*http.Response, string) {
 	e.t.Helper()
-	req, _ := http.NewRequest(method, e.admin.URL+path, nil)
+	return e.adminDoBody(method, path, key, "")
+}
+
+func (e *env) adminDoBody(method, path, key, body string) (*http.Response, string) {
+	e.t.Helper()
+	req, _ := http.NewRequest(method, e.admin.URL+path, strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+key)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

@@ -70,6 +70,12 @@ func (a *API) AdminOnly(h http.HandlerFunc) http.HandlerFunc {
 	return a.withAdmin(func(w http.ResponseWriter, r *http.Request, _ *auth.Principal) { h(w, r) })
 }
 
+// AdminActor wraps a handler from another package so it needs the admin
+// role and receives the caller's ID, for audit logs and created_by fields.
+func (a *API) AdminActor(h func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+	return a.withAdmin(func(w http.ResponseWriter, r *http.Request, p *auth.Principal) { h(w, r, p.KeyID) })
+}
+
 type handlerWithPrincipal func(http.ResponseWriter, *http.Request, *auth.Principal)
 
 func bearer(r *http.Request) string {

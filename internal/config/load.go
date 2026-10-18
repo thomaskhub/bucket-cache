@@ -276,11 +276,8 @@ func (c *Config) Validate() error {
 			if u, err := url.Parse(r.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
 				add("%s: url %q must be an http(s) URL without credentials", where, r.URL)
 			}
-			if len(r.Allow) == 0 {
-				add("%s: allow must list at least one owner/repo pattern", where)
-			}
 			for _, p := range r.Allow {
-				if p == "*" || p == "*/*" || strings.Count(p, "/") != 1 {
+				if !ValidAllowPattern(p) {
 					add("%s: allow pattern %q must be owner/repo or owner/*", where, p)
 				}
 			}
@@ -307,14 +304,31 @@ func (c *Config) Validate() error {
 
 // Allows reports whether the remote's allowlist covers ownerRepo, compared
 // case-insensitively (FR-80). Patterns are "owner/repo" or "owner/*".
-func (r *GitRemote) Allows(ownerRepo string) bool {
+func (r *GitRemote) Allows(ownerRepo string) bool { return MatchAllow(r.Allow, ownerRepo) }
+
+// MatchAllow reports whether one of the allowlist patterns covers ownerRepo,
+// compared case-insensitively.
+func MatchAllow(patterns []string, ownerRepo string) bool {
 	ownerRepo = strings.ToLower(ownerRepo)
-	for _, p := range r.Allow {
+	for _, p := range patterns {
 		if ok, _ := path.Match(strings.ToLower(p), ownerRepo); ok {
 			return true
 		}
 	}
 	return false
+}
+
+var (
+	allowOwnerRe = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$`)
+	allowRepoRe  = regexp.MustCompile(`^[A-Za-z0-9_.*-]{1,100}$`)
+)
+
+// ValidAllowPattern reports whether p is an allowlist pattern: an owner
+// name, a slash, and a repo name that may contain * wildcards. Owners can't
+// be wildcards, so a pattern never opens all of GitHub.
+func ValidAllowPattern(p string) bool {
+	owner, repo, ok := strings.Cut(p, "/")
+	return ok && allowOwnerRe.MatchString(owner) && allowRepoRe.MatchString(repo)
 }
 
 func (c *Config) resolveSecrets() error {

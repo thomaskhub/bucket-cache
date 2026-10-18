@@ -32,6 +32,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/thomaskhub/bucket-cache/internal/config"
+	"github.com/thomaskhub/bucket-cache/internal/store"
 )
 
 var (
@@ -58,6 +59,16 @@ type Options struct {
 	Registerer    prometheus.Registerer
 	HTTPClient    *http.Client // GitHub App API calls; default has a 30 s timeout
 	PublicBaseURL string       // for clone URLs in the admin API
+	// AllowStore keeps allowlist entries added through the admin API. Without
+	// it, only the config file's allow patterns apply.
+	AllowStore AllowStore
+}
+
+// AllowStore persists runtime allowlist entries (implemented by store.Store).
+type AllowStore interface {
+	ListGitAllow(ctx context.Context) ([]store.GitAllow, error)
+	AddGitAllow(ctx context.Context, a store.GitAllow) error
+	DeleteGitAllow(ctx context.Context, remote, pattern string) error
 }
 
 type remote struct {
@@ -98,6 +109,10 @@ type Manager struct {
 
 	mu      sync.Mutex
 	mirrors map[string]*Mirror // key: remote/owner/repo
+
+	allowStore AllowStore
+	allowMu    sync.RWMutex
+	allowExtra map[string][]store.GitAllow // remote name -> runtime entries
 }
 
 // New checks the git binary, prepares the storage directory and loads the
@@ -131,6 +146,7 @@ func New(ctx context.Context, cfg *config.Git, opt Options) (*Manager, error) {
 		cfg: cfg, run: run, log: opt.Logger, remotes: map[string]*remote{},
 		root: filepath.Join(cfg.Storage, "mirrors"), sem: make(chan struct{}, n),
 		baseURL: strings.TrimRight(opt.PublicBaseURL, "/"), now: time.Now, mirrors: map[string]*Mirror{},
+		allowStore: opt.AllowStore, allowExtra: map[string][]store.GitAllow{},
 	}
 	for _, rc := range cfg.Remotes {
 		creds, err := newCredentials(rc, run, opt.HTTPClient)
@@ -139,6 +155,17 @@ func New(ctx context.Context, cfg *config.Git, opt Options) (*Manager, error) {
 		}
 		m.remotes[rc.Name] = &remote{cfg: rc, base: strings.TrimRight(rc.URL, "/"), creds: creds}
 		m.order = append(m.order, rc.Name)
+	}
+	if m.allowStore != nil {
+		entries, err := m.allowStore.ListGitAllow(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("loading the git allowlist: %w", err)
+		}
+		for _, a := range entries {
+			if _, ok := m.remotes[a.Remote]; ok { // entries of removed remotes stay dormant
+				m.allowExtra[a.Remote] = append(m.allowExtra[a.Remote], a)
+			}
+		}
 	}
 	if err := os.MkdirAll(m.root, 0o750); err != nil {
 		return nil, err
@@ -202,7 +229,20 @@ func normalise(owner, repo string) (string, string, bool) {
 // owner and repo must already be normalised.
 func (m *Manager) Allowed(remoteName, owner, repo string) bool {
 	rm, ok := m.remotes[remoteName]
-	return ok && rm.cfg.Allows(owner+"/"+repo)
+	if !ok {
+		return false
+	}
+	if rm.cfg.Allows(owner + "/" + repo) {
+		return true
+	}
+	m.allowMu.RLock()
+	defer m.allowMu.RUnlock()
+	for _, a := range m.allowExtra[remoteName] {
+		if config.MatchAllow([]string{a.Pattern}, owner+"/"+repo) {
+			return true
+		}
+	}
+	return false
 }
 
 // mirror returns the in-memory entry for an allowed repo, creating it (but
