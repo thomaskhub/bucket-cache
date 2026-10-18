@@ -7,6 +7,13 @@
   <div class="stat"><span class="stat-label">Buckets</span><span class="stat-value" x-text="buckets"></span></div>
   <div class="stat" x-show="hasUsers()"><span class="stat-label">Users / API keys</span>
     <span class="stat-value"><span x-text="users"></span> / <span x-text="apikeys"></span></span></div>
+  <div class="stat" x-show="hasMirrors()"><span class="stat-label">Git mirrors</span>
+    <a class="stat-value" href="#/repos" id="stat-mirrors" x-text="mirrors"></a></div>
+  <template x-for="c in caches" :key="c.alias">
+    <div class="stat" :data-cache-ratio="c.alias"><span class="stat-label">Cache hit ratio · <span x-text="c.alias"></span></span>
+      <a class="stat-value" href="#/buckets" x-text="ratio(c)"></a>
+      <span class="text-xs text-slate-500"><span x-text="bytes(c.bytes_saved)"></span> saved</span></div>
+  </template>
 </div>
 
 <section class="card">

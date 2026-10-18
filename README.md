@@ -51,7 +51,7 @@ of alias and key, never the key itself.
   are still served (`STALE`) when that check fails.
 - 404s are cached for `negative_ttl` (default 30s, `0s` disables).
 - An LRU sweeper keeps usage between 85 % and 95 % of `max_size`.
-- Stats and purge (admin API key):
+- Stats (admin or user role) and purge (admin only), also on the UI's Buckets page:
 
 ```sh
 curl -H "Authorization: Bearer $ADMIN_KEY" http://cache.lan:8081/api/v1/buckets/sstate-cloud/cache
@@ -175,7 +175,7 @@ accepted as command-line arguments. In Docker: `docker exec -it yproxy yproxy us
 The UI is served on the admin listener at `/` (for example
 `http://cache.lan:8081/`). It has pages for the dashboard, tokens (CI and
 personal tokens, shown once with copy buttons), API keys, buckets (with a
-connection test), repositories (git mirrors with refresh and delete, shown when
+connection test and, for cache buckets, cache stats and purge), repositories (git mirrors with refresh and delete, shown when
 git is configured) and users. All assets (Alpine.js, Tailwind CSS) are embedded,
 so it works without internet access, and it uses only the `/api/v1` endpoints.
 

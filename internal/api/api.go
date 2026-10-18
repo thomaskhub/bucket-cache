@@ -53,7 +53,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/apikeys/{id}", a.withAdmin(a.revokeAPIKey))
 	mux.HandleFunc("GET /api/v1/buckets", a.withViewer(a.listBuckets))
 	mux.HandleFunc("POST /api/v1/buckets/{alias}/test", a.withAdmin(a.testBucket))
-	mux.HandleFunc("GET /api/v1/buckets/{alias}/cache", a.withAdmin(a.cacheStats))
+	mux.HandleFunc("GET /api/v1/buckets/{alias}/cache", a.withViewer(a.cacheStats)) // FR-60: users see cache stats
 	mux.HandleFunc("DELETE /api/v1/buckets/{alias}/cache", a.withAdmin(a.purgeCache))
 	a.registerSession(mux)
 	a.registerUsers(mux)
