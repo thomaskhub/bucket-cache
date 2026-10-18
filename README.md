@@ -9,32 +9,35 @@ The full requirements and the implementation plan live in the project's
 `requirements/` folder (`s3-https-proxy-requirements.md`,
 `implementation-plan.md`).
 
-## Status
+## Features
 
-Stage M0 (skeleton) is done:
+- **Objects:** `GET`/`HEAD` at `/t/{token}/{bucket}/{key}` (or `/{bucket}/{key}`
+  with a Bearer or Basic token), with Range and conditional requests,
+  streaming, and `404` for missing objects so BitBake falls back quickly. Each
+  bucket alias has its own backend, credentials and pool.
+- **Tokens:** one short-lived token per build, scoped to buckets and git
+  repos, created through the API and revoked by the build itself
+  (`DELETE /api/v1/tokens/self`). Only hashes are stored. Unknown tokens are
+  rate-limited; expired or revoked ones get `401`.
+- **Disk cache** per bucket ([below](#disk-cache)) and a **git mirror** for
+  GitHub and other HTTPS hosts ([below](#git-mirror)).
+- **Web UI** with users, passwords and TOTP ([below](#web-ui-and-users)).
+- **Prometheus metrics**, a Grafana dashboard and alert rules
+  (`deploy/monitoring/`).
+- **Container image:** non-root, read-only root filesystem, secrets only from
+  files, built-in `healthcheck`. Tagged releases are signed and come with an
+  SBOM.
+- **Tested** with unit and race tests, a browser test of the UI, and a weekly
+  BitBake end-to-end build against RustFS (`test/yocto/e2e.sh`).
 
-- Config loading with secrets only from files (`{file: /run/secrets/...}`),
-  `*_FILE` and `PROXY_*` environment overrides, and full validation.
-- Data listener (`:8080`) and admin listener (`:8081`) with `/healthz`,
-  `/readyz` and Prometheus `/metrics` (optionally behind a bearer token).
-- Docker image: non-root, read-only root filesystem, volumes `/data`,
-  `/cache` and `/git`, built-in `healthcheck` command.
-- CI: vet, race tests, lint, license check, a multi-arch image build and SBOMs.
-
-Stage M1 (S3 pass-through and tokens) is done:
-
-- `GET`/`HEAD` at `/t/{token}/{bucket}/{key}` (or `/{bucket}/{key}` with a
-  Bearer or Basic token), with Range and conditional requests, streaming, and
-  `404` for missing objects so BitBake falls back quickly.
-- Tokens and API keys (`admin`, `token-issuer` with a scope/TTL ceiling)
-  stored as hashes in SQLite; `DELETE /api/v1/tokens/self` for builds.
-- Only unknown tokens are rate-limited; expired or revoked tokens get `401`
-  and show up in `yproxy_auth_dead_token_requests_total`.
+More documentation: [configuration reference](docs/config.md),
+[Yocto integration guide](docs/yocto.md),
+[read-only backend credentials](docs/backend-policies.md).
 
 ## Disk cache
 
-Buckets with `mode: cache` keep a local copy under `storage.cache_root/<alias>`
-(stage M3). A miss is streamed to the client while it is written to a temp
+Buckets with `mode: cache` keep a local copy under `storage.cache_root/<alias>`.
+A miss is streamed to the client while it is written to a temp
 file, and concurrent requests for the same key share one backend fetch. The
 file is fsynced and renamed into place only when it is complete, so a crash or
 a broken transfer never leaves a partial object that gets served; leftover
