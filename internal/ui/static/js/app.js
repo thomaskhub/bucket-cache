@@ -87,6 +87,19 @@
       return (i === 0 ? n : n.toFixed(1)) + ' ' + u[i];
     },
 
+    // fmtRatio formats a cache stats object's hit ratio, or "—" before any request.
+    fmtRatio: function (s) {
+      if (!s || !(s.hits + s.stale + s.misses)) return '—';
+      return (100 * s.hit_ratio).toFixed(1) + '%';
+    },
+
+    // with returns a copy of obj with obj[key] = value, so Alpine sees the change.
+    with: function (obj, key, value) {
+      var next = Object.assign({}, obj);
+      next[key] = value;
+      return next;
+    },
+
     // list splits a comma or whitespace separated input into values.
     list: function (s) {
       return (s || '').split(/[\s,]+/).filter(function (x) { return x !== ''; });

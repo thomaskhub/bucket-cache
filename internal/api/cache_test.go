@@ -17,9 +17,10 @@ import (
 	"github.com/thomaskhub/bucket-cache/internal/config"
 	"github.com/thomaskhub/bucket-cache/internal/s3proxy"
 	"github.com/thomaskhub/bucket-cache/internal/store"
+	"github.com/thomaskhub/bucket-cache/internal/users"
 )
 
-func newCacheAPIEnv(t *testing.T) (*env, *cache.Store) {
+func newCacheAPIEnv(t *testing.T) (*env, *cache.Store, *uenv) {
 	t.Helper()
 	dir := t.TempDir()
 	sec := filepath.Join(dir, "s")
@@ -57,11 +58,18 @@ buckets:
 	}
 	t.Cleanup(c.Close)
 	backends := map[string]s3proxy.Backend{"sstate": fakeBackend{}, "downloads": fakeBackend{}}
+	sealer, _ := auth.NewSealer("cache-test-master-key-123456")
+	svc := users.New(st, sealer, log, users.Options{})
+	clk := &testClock{t: time.Now()}
+	svc.Now = clk.Now
+	if _, err := svc.Bootstrap(context.Background(), "admin", initialPW); err != nil {
+		t.Fatal(err)
+	}
 	mux := http.NewServeMux()
-	New(cfg, st, authn, backends, log).WithCaches(map[string]*cache.Store{"sstate": c}).Register(mux)
+	New(cfg, st, authn, backends, log).WithCaches(map[string]*cache.Store{"sstate": c}).WithUsers(svc).Register(mux)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return &env{t: t, srv: srv, authn: authn}, c
+	return &env{t: t, srv: srv, authn: authn}, c, &uenv{t: t, srv: srv, st: st, svc: svc, clk: clk, authn: authn}
 }
 
 func fill(t *testing.T, c *cache.Store, key string) {
@@ -85,7 +93,7 @@ func fill(t *testing.T, c *cache.Store, key string) {
 }
 
 func TestCacheStatsAndPurge(t *testing.T) {
-	e, c := newCacheAPIEnv(t)
+	e, c, _ := newCacheAPIEnv(t)
 	for _, k := range []string{"kirkstone/a", "kirkstone/b", "scarthgap/a", "x"} {
 		fill(t, c, k)
 	}
@@ -120,14 +128,38 @@ func TestCacheStatsAndPurge(t *testing.T) {
 		t.Errorf("unknown bucket = %d, want 404", code)
 	}
 
-	// Admin role only.
+	// Purging is admin only; token-issuer keys see neither stats nor purge.
 	_, out = e.call("POST", "/api/v1/apikeys", adminKey, map[string]any{
 		"name": "ci", "role": "token-issuer", "ceiling": map[string]any{"scope": map[string]any{"buckets": []string{"sstate"}}, "max_ttl": "8h"}})
 	issuer := out["key"].(string)
 	if code, _ := e.call("DELETE", "/api/v1/buckets/sstate/cache", issuer, nil); code != 403 {
 		t.Errorf("issuer purge = %d, want 403", code)
 	}
+	if code, _ := e.call("GET", "/api/v1/buckets/sstate/cache", issuer, nil); code != 403 {
+		t.Errorf("issuer stats = %d, want 403", code)
+	}
 	if code, _ := e.call("GET", "/api/v1/buckets/sstate/cache", "", nil); code != 401 {
 		t.Errorf("anonymous stats = %d, want 401", code)
+	}
+}
+
+// FR-60: UI users may view cache stats; only admins purge.
+func TestCacheStatsForUsers(t *testing.T) {
+	_, c, ue := newCacheAPIEnv(t)
+	fill(t, c, "k")
+	admin := ue.onboard("admin", initialPW, "admin-new-password")
+	r := admin.do("POST", "/api/v1/users", map[string]string{"username": "dev", "role": "user"})
+	if r.code != 201 {
+		t.Fatalf("create user: %d %v", r.code, r.body)
+	}
+	dev := ue.onboard("dev", r.body["password"].(string), "dev-chosen-password")
+	if r := dev.do("GET", "/api/v1/buckets/sstate/cache", nil); r.code != 200 || r.body["objects"] != float64(1) {
+		t.Fatalf("user stats = %d %v", r.code, r.raw)
+	}
+	if r := dev.do("DELETE", "/api/v1/buckets/sstate/cache", nil); r.code != 403 {
+		t.Fatalf("user purge = %d, want 403", r.code)
+	}
+	if r := admin.do("DELETE", "/api/v1/buckets/sstate/cache?key=k", nil); r.code != 200 || r.body["removed"] != float64(1) {
+		t.Fatalf("admin purge via session = %d %v", r.code, r.raw)
 	}
 }

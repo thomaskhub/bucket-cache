@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -30,9 +31,11 @@ import (
 	cdplog "github.com/chromedp/cdproto/log"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/thomaskhub/bucket-cache/internal/api"
 	"github.com/thomaskhub/bucket-cache/internal/auth"
+	"github.com/thomaskhub/bucket-cache/internal/cache"
 	"github.com/thomaskhub/bucket-cache/internal/config"
 	"github.com/thomaskhub/bucket-cache/internal/gitmirror"
 	"github.com/thomaskhub/bucket-cache/internal/s3proxy"
@@ -108,6 +111,28 @@ func newGitUpstream(t *testing.T) string {
 	return srv.URL
 }
 
+// fakeS3 serves GetObject/HeadObject for one path-style bucket "b".
+type fakeS3 map[string]string
+
+func (f fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	key, ok := strings.CutPrefix(r.URL.Path, "/b/")
+	data, found := f[key]
+	if !ok || !found {
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(http.StatusNotFound)
+		if r.Method != http.MethodHead {
+			io.WriteString(w, `<?xml version="1.0"?><Error><Code>NoSuchKey</Code><Message>x</Message></Error>`)
+		}
+		return
+	}
+	w.Header().Set("ETag", `"`+key+`"`)
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.WriteHeader(http.StatusOK)
+	if r.Method == http.MethodGet {
+		io.WriteString(w, data)
+	}
+}
+
 type offsetClock struct {
 	mu  sync.Mutex
 	off time.Duration
@@ -134,6 +159,8 @@ func TestBrowserLoginAndTokens(t *testing.T) {
 	sec := filepath.Join(dir, "s")
 	os.WriteFile(sec, []byte("SECRET"), 0o600)
 	upstream := newGitUpstream(t)
+	s3 := httptest.NewServer(fakeS3{"a/one": strings.Repeat("1", 1000), "a/two": strings.Repeat("2", 2000), "b/three": "3"})
+	defer s3.Close()
 	cfg, err := config.Parse([]byte(`
 server: { public_base_url: "http://cache.lan:8080" }
 buckets:
@@ -142,6 +169,14 @@ buckets:
     endpoint: http://s3.lan
     bucket: b
     credentials: { access_key_id: { file: `+sec+` }, secret_access_key: { file: `+sec+` } }
+  - alias: cached
+    provider: generic
+    endpoint: `+s3.URL+`
+    bucket: b
+    credentials: { access_key_id: { file: `+sec+` }, secret_access_key: { file: `+sec+` } }
+    mode: cache
+    cache: { max_size: 1MiB }
+storage: { cache_root: `+filepath.Join(dir, "cache")+` }
 git:
   storage: `+filepath.Join(dir, "git")+`
   remotes:
@@ -170,8 +205,16 @@ git:
 	if _, err := svc.Bootstrap(context.Background(), "admin", "initial-password-1"); err != nil {
 		t.Fatal(err)
 	}
+	caches, err := cache.OpenAll(cfg, log, prometheus.NewRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cache.CloseAll(caches)
+	backends := map[string]s3proxy.Backend{"sstate": fakeBackend{}, "cached": s3proxy.NewS3Backend(cfg.Buckets[1])}
+	objects := s3proxy.NewHandler(backends, authn, log, prometheus.NewRegistry(), false)
+	objects.SetCache("cached", caches["cached"])
 	mux := http.NewServeMux()
-	apiSrv := api.New(cfg, st, authn, map[string]s3proxy.Backend{"sstate": fakeBackend{}}, log).WithUsers(svc)
+	apiSrv := api.New(cfg, st, authn, backends, log).WithUsers(svc).WithCaches(caches)
 	apiSrv.Register(mux)
 	mirrors.RegisterAPI(mux, apiSrv.Authenticated, apiSrv.AdminOnly)
 	h, err := ui.New()
@@ -179,7 +222,13 @@ git:
 		t.Fatal(err)
 	}
 	h.Register(mux)
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if objects.Match(r.URL.Path) { // the data plane, for filling the cache
+			objects.ServeHTTP(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	}))
 	defer srv.Close()
 
 	// Browser.
@@ -422,6 +471,58 @@ git:
 	if err != nil || !hidden {
 		t.Fatalf("repos nav entry without git: hidden=%v err=%v", hidden, err)
 	}
+
+	// 8. Cache stats and purge (FR-57, FR-60): fill the cache through the
+	// data plane from the fake S3, with one hit.
+	ciTok := auth.NewSecret(auth.TokenPrefix)
+	now := time.Now()
+	if err := st.CreateToken(context.Background(), &store.Token{ID: auth.NewID("tok_"), Hash: auth.Hash(ciTok), Kind: "ci",
+		Scope: store.Scope{Buckets: []string{"cached"}}, CreatedBy: "test", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"a/one", "a/two", "b/three", "a/one"} {
+		resp, err := http.Get(srv.URL + "/t/" + ciTok + "/cached/" + k)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s: %s", k, resp.Status)
+		}
+		for i := 0; i < 500; i++ {
+			if _, ok := caches["cached"].Lookup(k); ok {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	run("buckets page", chromedp.Navigate(srv.URL+"/#/buckets"), chromedp.WaitVisible(chromedp.CSS(`section[data-cache=cached]`)))
+	waitText(`section[data-cache=cached] [data-stat=objects]`, "3")
+	waitText(`section[data-cache=cached] [data-stat=ratio]`, "25.0%")
+	waitText(`section[data-cache=cached] [data-stat=usage]`, "2.9 KiB of 1.0 MiB")
+	shot("7-cache")
+	run("purge key",
+		chromedp.SendKeys(chromedp.CSS(`section[data-cache=cached] input[name=purge-key]`), "a/one"),
+		chromedp.Click(chromedp.CSS(`section[data-cache=cached] button[data-action=purge-key]`)),
+	)
+	waitText(`section[data-cache=cached] [data-purge=result]`, "Removed 1 objects")
+	waitText(`section[data-cache=cached] [data-stat=objects]`, "2")
+	if _, ok := caches["cached"].Lookup("a/one"); ok {
+		t.Fatal("a/one still cached after purging it")
+	}
+	run("purge all, first click", chromedp.Click(chromedp.CSS(`section[data-cache=cached] button[data-action=purge-all]`)))
+	waitText(`section[data-cache=cached] button[data-action=purge-all]`, "Click again")
+	if _, ok := caches["cached"].Lookup("a/two"); !ok {
+		t.Fatal("the first click purged without confirmation")
+	}
+	run("purge all, confirm", chromedp.Click(chromedp.CSS(`section[data-cache=cached] button[data-action=purge-all]`)))
+	waitText(`section[data-cache=cached] [data-purge=result]`, "Removed 2 objects")
+	waitText(`section[data-cache=cached] [data-stat=objects]`, "0")
+	shot("8-purged")
+	run("dashboard", chromedp.Navigate(srv.URL+"/#/dashboard"), chromedp.WaitVisible(chromedp.CSS(`[data-cache-ratio=cached]`)))
+	waitText(`[data-cache-ratio=cached] .stat-value`, "25.0%")
+	waitText(`#stat-mirrors`, "0")
 
 	// Visit every page once so their scripts run under the CSP.
 	for _, p := range []string{"dashboard", "apikeys", "buckets", "repos", "account"} {
