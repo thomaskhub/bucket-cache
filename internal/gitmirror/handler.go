@@ -245,12 +245,16 @@ func isV2(proto string) bool {
 
 // upstreamStatus maps a failed first clone to a status code: 404 when
 // upstream says the repo doesn't exist (so BitBake moves on quickly), 504
-// on timeout, else 502.
+// on timeout, else 502. Without credentials, GitHub answers a missing (or
+// private) repo with an auth challenge, which git reports as "could not
+// read Username"; that is a 404 too. A rejected token stays a 502, since
+// it's a proxy misconfiguration.
 func upstreamStatus(err error) int {
 	var ge *GitError
 	if errors.As(err, &ge) {
 		s := strings.ToLower(ge.Stderr)
-		if strings.Contains(s, "not found") || strings.Contains(s, "error: 404") {
+		if strings.Contains(s, "not found") || strings.Contains(s, "error: 404") ||
+			strings.Contains(s, "could not read username") {
 			return http.StatusNotFound
 		}
 	}
