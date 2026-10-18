@@ -54,3 +54,4 @@ jobs:
             .yocto-e2e/*.log
             .yocto-e2e/*.sigs
           if-no-files-found: ignore
+          include-hidden-files: true

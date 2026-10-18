@@ -22,7 +22,10 @@ DATA=http://127.0.0.1:18080
 ADMIN=http://127.0.0.1:18081
 
 log() { printf '\n=== %s\n' "$*"; }
-fail() { echo "FAIL: $*" >&2; exit 1; }
+# On GitHub Actions, results also go into annotations, which stay readable
+# through the API when the raw logs aren't.
+note() { echo "$*"; [ -z "${GITHUB_ACTIONS:-}" ] || echo "::notice title=yocto-e2e::$*"; }
+fail() { echo "FAIL: $*" >&2; [ -z "${GITHUB_ACTIONS:-}" ] || echo "::error title=yocto-e2e::$*"; exit 1; }
 
 mkdir -p "$WORK"/{secrets,data,cache,git}
 WORK=$(cd "$WORK" && pwd)
@@ -124,8 +127,10 @@ log "Build 2: empty SSTATE_DIR and DL_DIR, new token, mirror only"
 build two "$TOKEN2" 'BB_FETCH_PREMIRRORONLY = "1"'
 
 log "Checking results"
+note "build 1: $(grep -E 'Sstate summary|Tasks Summary' "$WORK/one.log" | tr '\n' ' ')"
 summary=$(grep -E 'Sstate summary' "$WORK/two.log" | tail -1)
-echo "$summary"
+note "build 2: $summary $(grep -E 'Tasks Summary' "$WORK/two.log")"
+note "task signatures: $(wc -l < "$WORK/one.sigs") identical between the two tokens"
 echo "$summary" | grep -q 'Missed 0' || fail "build 2 missed sstate objects"
 echo "$summary" | grep -qE 'Mirrors [1-9]' || fail "build 2 restored nothing from the mirror"
 grep -q 'Running task.*do_compile' "$WORK/two.log" && fail "build 2 compiled something instead of restoring it"
@@ -142,4 +147,5 @@ for t in "$TOKEN1" "$TOKEN2"; do
   grep -qF "$t" "$WORK/proxy.log" && fail "token value found in proxy log"
 done
 
+note "proxy requests: $(grep -c '"msg":"request"' "$WORK/proxy.log") total, $(grep -c '"method":"HEAD"' "$WORK/proxy.log") HEAD, $(grep -c '"status":200' "$WORK/proxy.log") with 200, $(grep -c '"status":404' "$WORK/proxy.log") with 404"
 log "PASS"
