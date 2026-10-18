@@ -41,6 +41,10 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
+      - name: Check monitoring files (FR-75)
+        run: |
+          jq empty deploy/monitoring/grafana-dashboard.json
+          docker run --rm -v "$PWD/deploy/monitoring:/m:ro" --entrypoint promtool prom/prometheus:latest check rules /m/yproxy-alerts.yml
       - name: SBOM for the Go binary (SEC-23)
         run: |
           go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0

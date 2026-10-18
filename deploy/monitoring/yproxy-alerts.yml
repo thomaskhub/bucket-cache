@@ -1,0 +1,58 @@
+# Alert rules for yproxy (FR-75). Thresholds are starting points; adjust them
+# to your build volume.
+groups:
+  - name: yproxy
+    rules:
+      - alert: YproxyDown
+        expr: up{job="yproxy"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "yproxy on {{ $labels.instance }} is not answering /metrics"
+
+      - alert: YproxyBackendErrors
+        expr: sum by (instance, bucket) (rate(yproxy_s3_backend_errors_total[5m])) > 0.1
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Bucket {{ $labels.bucket }} backend is failing ({{ $value | humanize }}/s)"
+          description: "Builds get 502/504 for this bucket. Check its credentials and endpoint with the bucket test in the UI."
+
+      - alert: YproxySlowObjects
+        expr: histogram_quantile(0.95, sum by (instance, bucket, le) (rate(yproxy_s3_request_duration_seconds_bucket[10m]))) > 2
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Bucket {{ $labels.bucket }} p95 time to first byte is {{ $value | humanizeDuration }}"
+
+      - alert: YproxyCacheFillErrors
+        expr: sum by (instance, bucket) (rate(yproxy_cache_fill_errors_total[10m])) > 0
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Disk cache for {{ $labels.bucket }} keeps failing to store objects"
+          description: "Often a full or read-only /cache volume."
+
+      - alert: YproxyDeadTokenInUse
+        expr: sum by (instance, token_id) (rate(yproxy_auth_dead_token_requests_total[10m])) > 0.5
+        for: 10m
+        labels: { severity: info }
+        annotations:
+          summary: "Something keeps using expired or revoked token {{ $labels.token_id }}"
+          description: "A build with a dead token gets no sstate and rebuilds everything."
+
+      - alert: YproxyGitMirrorStale
+        expr: max by (instance, remote, repo) (yproxy_git_mirror_stale) == 1
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Git mirror {{ $labels.remote }}/{{ $labels.repo }} can't reach upstream"
+          description: "Clones still work from the mirror, but new commits upstream aren't visible."
+
+      - alert: YproxyGitFetchErrors
+        expr: sum by (instance, remote) (rate(yproxy_git_upstream_fetch_errors_total[10m])) > 0.05
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Upstream git fetches for {{ $labels.remote }} are failing"
+          description: "Check the remote's token or GitHub App, and GitHub's status."

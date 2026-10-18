@@ -1,0 +1,13 @@
+# Example scrape config for yproxy. /metrics is on the admin listener; if
+# metrics.bearer_token is set, Prometheus sends it from a file.
+scrape_configs:
+  - job_name: yproxy
+    scrape_interval: 30s
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/yproxy_metrics_token
+    static_configs:
+      - targets: ["cache.example.lan:8081"]
+
+rule_files:
+  - yproxy-alerts.yml
