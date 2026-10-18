@@ -17,6 +17,8 @@ YPROXY=${YPROXY:-./yproxy}
 POKY_REPO=${POKY_REPO:-https://github.com/yoctoproject/poky}
 POKY_BRANCH=${POKY_BRANCH:-scarthgap}
 TARGET=${TARGET:-quilt-native}
+GIT_TARGET=${GIT_TARGET:-ninja-native}   # fetches git://github.com/ninja-build/ninja.git
+GIT_REPO=${GIT_REPO:-ninja-build/ninja}
 WORK=${WORK:-$PWD/.yocto-e2e}
 DATA=http://127.0.0.1:18080
 ADMIN=http://127.0.0.1:18081
@@ -55,6 +57,12 @@ buckets:
     endpoint: $RUSTFS_ENDPOINT
     bucket: e2e-downloads
     credentials: { access_key_id: { file: $WORK/secrets/ak }, secret_access_key: { file: $WORK/secrets/sk } }
+git:
+  storage: $WORK/git
+  remotes:
+    - name: github
+      url: https://github.com
+      allow: ["${GIT_REPO%%/*}/*"]
 log: { level: info, access: true }
 CFG
 "$YPROXY" serve --config "$WORK/config.yaml" > "$WORK/proxy.log" 2>&1 &
@@ -65,14 +73,15 @@ curl -fs -o /dev/null "$ADMIN/healthz" || { cat "$WORK/proxy.log"; fail "proxy d
 
 new_token() {
   curl -fsS -X POST "$ADMIN/api/v1/tokens" -H "Authorization: Bearer $(cat "$WORK/secrets/admin_api_key")" \
-    -d '{"buckets":["sstate","downloads"],"ttl":"6h","description":"yocto e2e"}' | jq -r .token
+    -d '{"buckets":["sstate","downloads"],"git":[{"remote":"github","repos":["'"$GIT_REPO"'"]}],"ttl":"6h","description":"yocto e2e"}' | jq -r .token
 }
 
 log "Cloning poky $POKY_BRANCH"
 [ -d "$WORK/poky" ] || git clone -q --depth 1 --branch "$POKY_BRANCH" "$POKY_REPO" "$WORK/poky"
 
-# build <name> <token> <extra local.conf lines>
-build() {
+# setup_build <name> <token> <extra local.conf lines>: fresh build dir with
+# empty SSTATE_DIR and DL_DIR, entered with pushd.
+setup_build() {
   local name=$1 token=$2 extra=$3 dir="$WORK/build-$1"
   rm -rf "$dir"
   pushd . > /dev/null
@@ -99,6 +108,12 @@ $extra
 CONF
   export SSTATE_PROXY_TOKEN=$token
   export BB_ENV_PASSTHROUGH_ADDITIONS="${BB_ENV_PASSTHROUGH_ADDITIONS:-} SSTATE_PROXY_TOKEN"
+}
+
+# build <name> <token> <extra local.conf lines>
+build() {
+  local name=$1 dir="$WORK/build-$1"
+  setup_build "$@"
   bitbake "$TARGET" 2>&1 | tee "$WORK/$name.log"
   # Write signature data for every task; the file names carry the task hashes.
   bitbake -S none "$TARGET" > /dev/null
@@ -148,4 +163,45 @@ for t in "$TOKEN1" "$TOKEN2"; do
 done
 
 note "proxy requests: $(grep -c '"msg":"request"' "$WORK/proxy.log") total, $(grep -c '"method":"HEAD"' "$WORK/proxy.log") HEAD, $(grep -c '"status":200' "$WORK/proxy.log") with 200, $(grep -c '"status":404' "$WORK/proxy.log") with 404"
+log "Git: insteadOf rules (YOC-4)"
+TOKEN3=$(new_token)
+GH=$WORK/githome
+mkdir -p "$GH"
+P="http://ci:$TOKEN3@127.0.0.1:18080/git/github/"
+HOME=$GH git config --global url."$P".insteadOf "https://github.com/"
+HOME=$GH git config --global --add url."$P".insteadOf "git@github.com:"
+HOME=$GH git config --global --add url."$P".insteadOf "ssh://git@github.com/"
+for v in 0 2; do
+  for u in "https://github.com/$GIT_REPO.git" "git@github.com:$GIT_REPO.git" "ssh://git@github.com/$GIT_REPO.git"; do
+    HOME=$GH GIT_SSH_COMMAND=false git -c protocol.version=$v ls-remote "$u" HEAD > /dev/null ||
+      fail "git ls-remote $u with protocol v$v failed through the proxy"
+  done
+  rm -rf "$WORK/clone"
+  HOME=$GH git -c protocol.version=$v clone -q --depth 1 --single-branch "https://github.com/$GIT_REPO.git" "$WORK/clone" ||
+    fail "shallow single-branch clone with protocol v$v failed"
+done
+note "git: ls-remote for https, git@ and ssh:// URLs and shallow clones work with protocol v0 and v2"
+
+# BitBake's git fetcher runs git with HOME passed through, so the rules apply.
+real_home=$HOME
+export HOME=$GH
+setup_build git-insteadof "$TOKEN3" ""
+bitbake "$GIT_TARGET" -c fetch 2>&1 | tee "$WORK/git-insteadof.log"
+ls "$WORK/build-git-insteadof/downloads/git2" | grep -qi ninja || fail "bitbake did not fetch $GIT_REPO with insteadOf"
+popd > /dev/null
+export HOME=$real_home
+
+log "Git: path-token premirror, no git config"
+setup_build git-premirror "$TOKEN3" 'PREMIRRORS:prepend = "git://github.com/.* git://127.0.0.1:18080/t/${SSTATE_PROXY_TOKEN}/git/github/PATH;protocol=http \n"
+BB_FETCH_PREMIRRORONLY = "1"'
+bitbake "$GIT_TARGET" -c fetch 2>&1 | tee "$WORK/git-premirror.log"
+ls "$WORK/build-git-premirror/downloads/git2" | grep -qi ninja || fail "bitbake did not fetch $GIT_REPO through the path-token premirror"
+popd > /dev/null
+
+gitreq=$(curl -fsS "$ADMIN/metrics" | awk '/^yproxy_git_requests_total/ {s+=$NF} END {print s+0}')
+[ "$gitreq" -gt 0 ] || fail "no git requests counted by the proxy"
+note "git: BitBake fetched $GIT_REPO via insteadOf and via the path-token premirror; $gitreq git requests served"
+grep -qF "$TOKEN3" "$WORK/proxy.log" && fail "git token value found in proxy log"
+
 log "PASS"
+
