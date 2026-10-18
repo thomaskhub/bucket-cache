@@ -19,6 +19,7 @@ import (
 
 	"github.com/thomaskhub/bucket-cache/internal/api"
 	"github.com/thomaskhub/bucket-cache/internal/auth"
+	"github.com/thomaskhub/bucket-cache/internal/cache"
 	"github.com/thomaskhub/bucket-cache/internal/config"
 	"github.com/thomaskhub/bucket-cache/internal/gitmirror"
 	"github.com/thomaskhub/bucket-cache/internal/metrics"
@@ -138,6 +139,12 @@ func serve(cfgPath string, stderr io.Writer) int {
 	}
 
 	reg := metrics.NewRegistry()
+	caches, err := cache.OpenAll(cfg, log, reg)
+	if err != nil {
+		log.Error("opening disk cache failed", "path", cfg.Storage.CacheRoot, "error", err.Error())
+		return 1
+	}
+	defer cache.CloseAll(caches) // after the listeners have drained
 	authn := auth.New(st, log, cfg.Auth.BootstrapAdminKey.Value(), cfg.Auth.ValidationCacheTTL.D())
 	var mirrors *gitmirror.Manager
 	if cfg.Git != nil {
@@ -158,6 +165,9 @@ func serve(cfgPath string, stderr io.Writer) int {
 		backends[b.Alias] = s3proxy.NewS3Backend(b)
 	}
 	objects := s3proxy.NewHandler(backends, authn, log, reg, cfg.Log.Access)
+	for alias, c := range caches {
+		objects.SetCache(alias, c)
+	}
 
 	opts := []server.Option{server.WithPing(st.Ping)}
 	gitDone := make(chan struct{})
@@ -172,7 +182,7 @@ func serve(cfgPath string, stderr io.Writer) int {
 	opts = append(opts, server.WithRoute(objects))
 
 	srv := server.New(cfg, log, reg, opts...)
-	apiSrv := api.New(cfg, st, authn, backends, log).WithUsers(userSvc)
+	apiSrv := api.New(cfg, st, authn, backends, log).WithUsers(userSvc).WithCaches(caches)
 	apiSrv.Register(srv.Admin)
 	webUI.Register(srv.Admin)
 	if mirrors != nil {

@@ -92,7 +92,10 @@ func (c *Config) applyDefaults() {
 			str(&b.Region, "us-east-1")
 		}
 		str(&b.Cache.Freshness, "immutable")
-		def(&b.Cache.NegativeTTL, 30*time.Second)
+		if b.Cache.NegativeTTL == nil {
+			d := Duration(30 * time.Second)
+			b.Cache.NegativeTTL = &d
+		}
 		def(&b.Timeouts.Connect, 5*time.Second)
 		def(&b.Timeouts.FirstByte, 30*time.Second)
 		def(&b.Timeouts.Idle, 90*time.Second)

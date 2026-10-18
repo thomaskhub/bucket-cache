@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/thomaskhub/bucket-cache/internal/auth"
+	"github.com/thomaskhub/bucket-cache/internal/cache"
 	"github.com/thomaskhub/bucket-cache/internal/config"
 	"github.com/thomaskhub/bucket-cache/internal/s3proxy"
 	"github.com/thomaskhub/bucket-cache/internal/store"
@@ -24,6 +25,7 @@ type API struct {
 	store    *store.Store
 	auth     *auth.Authenticator
 	backends map[string]s3proxy.Backend
+	caches   map[string]*cache.Store
 	log      *slog.Logger
 	now      func() time.Time
 	users    *users.Service // nil: no UI sessions (see WithUsers)
@@ -32,6 +34,12 @@ type API struct {
 // New returns the API.
 func New(cfg *config.Config, st *store.Store, a *auth.Authenticator, backends map[string]s3proxy.Backend, log *slog.Logger) *API {
 	return &API{cfg: cfg, store: st, auth: a, backends: backends, log: log, now: time.Now}
+}
+
+// WithCaches gives the API the disk caches for stats and purging (FR-57).
+func (a *API) WithCaches(c map[string]*cache.Store) *API {
+	a.caches = c
+	return a
 }
 
 // Register mounts the endpoints on mux.
@@ -45,6 +53,8 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/apikeys/{id}", a.withAdmin(a.revokeAPIKey))
 	mux.HandleFunc("GET /api/v1/buckets", a.withViewer(a.listBuckets))
 	mux.HandleFunc("POST /api/v1/buckets/{alias}/test", a.withAdmin(a.testBucket))
+	mux.HandleFunc("GET /api/v1/buckets/{alias}/cache", a.withAdmin(a.cacheStats))
+	mux.HandleFunc("DELETE /api/v1/buckets/{alias}/cache", a.withAdmin(a.purgeCache))
 	a.registerSession(mux)
 	a.registerUsers(mux)
 }
@@ -442,4 +452,42 @@ func (a *API) testBucket(w http.ResponseWriter, r *http.Request, _ *auth.Princip
 		}
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// bucketCache finds the cache of the bucket in the path, or writes an error.
+func (a *API) bucketCache(w http.ResponseWriter, r *http.Request) *cache.Store {
+	alias := r.PathValue("alias")
+	if _, ok := a.backends[alias]; !ok {
+		writeErr(w, http.StatusNotFound, "bucket not found")
+		return nil
+	}
+	c := a.caches[alias]
+	if c == nil {
+		writeErr(w, http.StatusConflict, "bucket is not in cache mode")
+		return nil
+	}
+	return c
+}
+
+func (a *API) cacheStats(w http.ResponseWriter, r *http.Request, _ *auth.Principal) {
+	if c := a.bucketCache(w, r); c != nil {
+		writeJSON(w, http.StatusOK, c.Stats())
+	}
+}
+
+// purgeCache removes the whole cache of a bucket, one key (?key=) or every
+// key under a prefix (?prefix=) (FR-57).
+func (a *API) purgeCache(w http.ResponseWriter, r *http.Request, p *auth.Principal) {
+	c := a.bucketCache(w, r)
+	if c == nil {
+		return
+	}
+	key, prefix := r.URL.Query().Get("key"), r.URL.Query().Get("prefix")
+	if key != "" && prefix != "" {
+		writeErr(w, http.StatusBadRequest, "use either key or prefix, not both")
+		return
+	}
+	n, bytes := c.Purge(key, prefix)
+	a.log.Info("cache purge", "bucket", c.Alias(), "key", key, "prefix", prefix, "objects", n, "by", p.KeyID)
+	writeJSON(w, http.StatusOK, map[string]any{"alias": c.Alias(), "removed": n, "bytes_freed": bytes})
 }

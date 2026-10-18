@@ -69,6 +69,9 @@ func TestParseValidConfig(t *testing.T) {
 	if c.Buckets[1].Region != "auto" {
 		t.Errorf("r2 region default = %q, want auto", c.Buckets[1].Region)
 	}
+	if c.Buckets[0].Cache.NegativeTTL.D() != 30*time.Second || c.Buckets[1].Cache.NegativeTTL.D() != 0 {
+		t.Errorf("negative_ttl: default %s, explicit 0s became %s", c.Buckets[0].Cache.NegativeTTL.D(), c.Buckets[1].Cache.NegativeTTL.D())
+	}
 	if c.Buckets[1].Cache.MaxSize != 200<<30 {
 		t.Errorf("max_size = %d", c.Buckets[1].Cache.MaxSize)
 	}

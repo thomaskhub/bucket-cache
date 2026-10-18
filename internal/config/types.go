@@ -235,11 +235,12 @@ type Credentials struct {
 }
 
 type BucketCache struct {
-	MaxSize     ByteSize `yaml:"max_size"`
-	Freshness   string   `yaml:"freshness"`
-	MaxAge      Duration `yaml:"max_age"`
-	NegativeTTL Duration `yaml:"negative_ttl"`
-	ServeStale  bool     `yaml:"serve_stale"`
+	MaxSize   ByteSize `yaml:"max_size"`
+	Freshness string   `yaml:"freshness"`
+	MaxAge    Duration `yaml:"max_age"`
+	// NegativeTTL is a pointer so an explicit 0 (disable) differs from unset (FR-55).
+	NegativeTTL *Duration `yaml:"negative_ttl"`
+	ServeStale  bool      `yaml:"serve_stale"`
 }
 
 type Timeouts struct {
