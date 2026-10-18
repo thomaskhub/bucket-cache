@@ -301,7 +301,11 @@ type Reader struct {
 
 func newReader(ctx context.Context, fl *fill, f *os.File) *Reader {
 	r := &Reader{fl: fl, f: f, ctx: ctx}
-	if !fl.done {
+	// done is written by the fill goroutine, so it must be read under fl.mu.
+	fl.mu.Lock()
+	done := fl.done
+	fl.mu.Unlock()
+	if !done {
 		// Wake a Read that waits for bytes when the client goes away.
 		r.stop = context.AfterFunc(ctx, func() {
 			fl.mu.Lock()
