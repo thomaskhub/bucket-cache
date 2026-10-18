@@ -44,17 +44,26 @@ buckets:
       serve_stale: true
 
 git:
-  storage: /git
-  max_size: 300GiB
-  evict_after: 90d
+  storage: /git                 # own volume; also holds git's HOME (.home) and temp files (.tmp)
+  max_size: 300GiB              # least recently used mirrors are evicted above this
+  evict_after: 90d              # mirrors not used for this long are removed
+  # max_concurrency: 0          # upload-pack processes at once (0 = 4 per CPU, at least 8)
+  # fetch_timeout: 30m          # one upstream clone or fetch
+  # maintenance_interval: 1h    # git maintenance run --auto, then eviction
   remotes:
-    - name: github
+    - name: github              # served at /git/github/{owner}/{repo}.git
       url: https://github.com
       credentials:
-        token: { file: /run/secrets/github_token }
-      allow: ["acme/*"]
-      refresh_interval: 10m
-      ls_remote_cache: 3s
+        token: { file: /run/secrets/github_token }   # or a GitHub App:
+        # app_id: "123456"
+        # app_private_key: { file: /run/secrets/github_app_key }
+      allow: ["acme/*", "yoctoproject/poky", "openembedded/*"]
+      # seed: ["yoctoproject/poky"]   # mirrored at start-up
+      refresh_interval: 10m     # background check of every mirror
+      ls_remote_cache: 3s       # freshness check result reused this long
+      upstream_timeout: 3s      # after this the stale mirror is served
+      prune: true
+      include_pull_refs: false
 
 metrics:
   bearer_token: { file: /run/secrets/metrics_token }

@@ -236,6 +236,13 @@ type Git struct {
 	MaxSize    ByteSize    `yaml:"max_size"`
 	EvictAfter Duration    `yaml:"evict_after"`
 	Remotes    []GitRemote `yaml:"remotes"`
+	// MaxConcurrency limits concurrent upload-pack processes (FR-93).
+	// 0 means 4 per CPU, at least 8.
+	MaxConcurrency int `yaml:"max_concurrency"`
+	// FetchTimeout bounds one upstream clone or fetch.
+	FetchTimeout Duration `yaml:"fetch_timeout"`
+	// MaintenanceInterval is how often git maintenance and eviction run (FR-89).
+	MaintenanceInterval Duration `yaml:"maintenance_interval"`
 }
 
 type GitRemote struct {
@@ -247,12 +254,20 @@ type GitRemote struct {
 	LsRemoteCache   Duration       `yaml:"ls_remote_cache"`
 	Prune           *bool          `yaml:"prune"`
 	IncludePullRefs bool           `yaml:"include_pull_refs"`
+	// UpstreamTimeout bounds the ls-remote freshness check; after it the
+	// stale mirror is served (FR-84, FR-87).
+	UpstreamTimeout Duration `yaml:"upstream_timeout"`
+	// Seed lists owner/repo names mirrored at start-up (FR-83).
+	Seed []string `yaml:"seed"`
 }
 
 type GitCredentials struct {
 	Token         Secret `yaml:"token"`
 	AppID         string `yaml:"app_id"`
 	AppPrivateKey Secret `yaml:"app_private_key"`
+	// APIURL is the GitHub API base for App auth. Default: https://api.github.com
+	// for github.com, otherwise <url>/api/v3 (GitHub Enterprise Server).
+	APIURL string `yaml:"api_url"`
 }
 
 type Metrics struct {

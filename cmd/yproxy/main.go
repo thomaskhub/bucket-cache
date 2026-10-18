@@ -20,6 +20,7 @@ import (
 	"github.com/thomaskhub/bucket-cache/internal/api"
 	"github.com/thomaskhub/bucket-cache/internal/auth"
 	"github.com/thomaskhub/bucket-cache/internal/config"
+	"github.com/thomaskhub/bucket-cache/internal/gitmirror"
 	"github.com/thomaskhub/bucket-cache/internal/metrics"
 	"github.com/thomaskhub/bucket-cache/internal/s3proxy"
 	"github.com/thomaskhub/bucket-cache/internal/server"
@@ -122,6 +123,14 @@ func serve(cfgPath string, stderr io.Writer) int {
 
 	reg := metrics.NewRegistry()
 	authn := auth.New(st, log, cfg.Auth.BootstrapAdminKey.Value(), cfg.Auth.ValidationCacheTTL.D())
+	var mirrors *gitmirror.Manager
+	if cfg.Git != nil {
+		mirrors, err = gitmirror.New(ctx, cfg.Git, gitmirror.Options{Logger: log, Registerer: reg, PublicBaseURL: cfg.Server.PublicBaseURL})
+		if err != nil {
+			log.Error("starting the git mirror failed", "error", err.Error())
+			return 1
+		}
+	}
 	maintCtx, stopMaint := context.WithCancel(context.Background())
 	maintDone := make(chan struct{})
 	go func() { authn.RunMaintenance(maintCtx, 10*time.Second); close(maintDone) }()
@@ -133,12 +142,29 @@ func serve(cfgPath string, stderr io.Writer) int {
 	}
 	objects := s3proxy.NewHandler(backends, authn, log, reg, cfg.Log.Access)
 
-	srv := server.New(cfg, log, reg, server.WithRoute(objects), server.WithPing(st.Ping))
-	api.New(cfg, st, authn, backends, log).Register(srv.Admin)
+	opts := []server.Option{server.WithPing(st.Ping)}
+	gitDone := make(chan struct{})
+	if mirrors != nil {
+		// The git route goes first: the object route also claims /t/{token}/...
+		opts = append(opts, server.WithRoute(mirrors.NewHandler(authn, cfg.Log.Access)),
+			server.WithReadyDetail("git", mirrors.ReadyDetails))
+		go func() { mirrors.Run(ctx); close(gitDone) }()
+	} else {
+		close(gitDone)
+	}
+	opts = append(opts, server.WithRoute(objects))
+
+	srv := server.New(cfg, log, reg, opts...)
+	apiSrv := api.New(cfg, st, authn, backends, log)
+	apiSrv.Register(srv.Admin)
+	if mirrors != nil {
+		mirrors.RegisterAPI(srv.Admin, apiSrv.Authenticated, apiSrv.AdminOnly)
+	}
 
 	runErr := srv.Run(ctx)
 	stopMaint()
 	<-maintDone // flush token usage before the database closes
+	<-gitDone
 	if runErr != nil {
 		log.Error("server stopped", "error", runErr.Error())
 		return 1
